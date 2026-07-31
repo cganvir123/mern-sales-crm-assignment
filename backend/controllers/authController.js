@@ -64,7 +64,7 @@ const login = async (req, res, next) => {
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production", // true in production
-      sameSite: "strict",
+      sameSite: "none",
     };
 
     res.cookie("accessToken", accessToken, {
@@ -90,7 +90,7 @@ const logout = async (req, res, next) => {
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "none",
     };
 
     // Destroy the cookies by setting their expiration to a past date

@@ -12,8 +12,13 @@ app.use(express.json());
 app.use(cookieParser()); // Crucial for reading HTTP-only cookies
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
-    credentials: true, // Crucial for allowing cookies across origins
+    origin: [
+      "http://localhost:3000", // Keep local for testing
+      "https://mern-sales-crm-assignment.vercel.app", // Add your live Vercel URL
+    ],
+    credentials: true, // This is CRUCIAL since your frontend sends cookies
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
