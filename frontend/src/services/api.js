@@ -1,7 +1,19 @@
 import axios from "axios";
 
+// ----------------------------------------------------
+// TOGGLE THESE DEPENDING ON YOUR ENVIRONMENT
+// ----------------------------------------------------
+
+// 1. Local Development URL:
+// const BASE_URL = "http://localhost:5000/api";
+
+// 2. Live Production URL (Render):
+const BASE_URL = "https://mern-sales-crm-assignment.onrender.com/api";
+
+// ----------------------------------------------------
+
 const api = axios.create({
-  baseURL: "http://localhost:5000/api", // Pull from environment variables in production
+  baseURL: BASE_URL,
   withCredentials: true, // CRUCIAL for sending the HTTP-only cookies
   headers: {
     "Content-Type": "application/json",
@@ -27,25 +39,20 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        // FIX: Use plain 'axios' here, NOT 'api', to completely bypass the interceptor
-        // You must specify the full URL and include withCredentials manually
+        // Use plain 'axios' here to completely bypass the interceptor
         await axios.post(
-          "http://localhost:5000/api/auth/refresh",
+          `${BASE_URL}/auth/refresh`,
           {},
           { withCredentials: true },
         );
 
-        // If successful, the backend just set a fresh accessToken cookie.
-        // Now, retry the exact same original request that failed.
+        // If successful, retry the exact same original request that failed
         return api(originalRequest);
       } catch (refreshError) {
-        // If the refresh fails (e.g., the 7-day refresh token also expired),
-        // the user must log in again.
-
+        // If refresh fails, explicitly destroy cookies and redirect to login
         try {
-          // Tell backend to explicitly destroy the dead/orphaned cookies
           await axios.post(
-            "http://localhost:5000/api/auth/logout",
+            `${BASE_URL}/auth/logout`,
             {},
             { withCredentials: true },
           );
@@ -53,17 +60,14 @@ api.interceptors.response.use(
           console.error("Logout failed", logoutError);
         }
 
-        // Clear the local profile data
+        // Clear local storage and redirect
         localStorage.removeItem("crm_user");
-
-        // Force redirect to login page (standard browser redirect)
         window.location.href = "/login";
 
         return Promise.reject(refreshError);
       }
     }
 
-    // For all other errors (400, 404, 500, etc.), just reject the promise normally
     return Promise.reject(error);
   },
 );
