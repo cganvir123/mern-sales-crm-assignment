@@ -10,6 +10,7 @@ import AllUsers from "./pages/AllUsers"; // Admin only page
 import CreateLead from "./pages/CreateLead";
 import LeadDetail from "./pages/LeadDetail";
 import SalesPipeline from "./pages/SalesPipeline";
+import Leads from "./pages/Leads";
 
 function App() {
   return (
@@ -23,9 +24,9 @@ function App() {
           {/* Protected Routes (For ANY logged in user) */}
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/leads" element={<Leads />} /> {/* <-- NEW */}
             <Route path="/pipeline" element={<SalesPipeline />} />
-            <Route path="/leads/new" element={<CreateLead />} />{" "}
-            {/* <-- Make sure this line exists! */}
+            <Route path="/leads/new" element={<CreateLead />} />
             <Route path="/leads/:id" element={<LeadDetail />} />
           </Route>
 

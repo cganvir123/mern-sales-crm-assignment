@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
 const User = require("../models/User"); // <-- NEW: Import the User model
+const cookieOptions = require("../utils/cookieOptions"); // <-- NEW: shared cookie settings
 const { login, register, logout } = require("../controllers/authController");
 const {
   validateRegister,
@@ -39,10 +40,10 @@ router.post("/refresh", async (req, res) => {
       { expiresIn: "15m" },
     );
 
+    // Use the SAME environment-aware options as login
+    // (was sameSite: "strict", which blocks the cookie cross-site in production)
     res.cookie("accessToken", newAccessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000,
     });
 

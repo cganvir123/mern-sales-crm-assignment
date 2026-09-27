@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const cookieOptions = require("../utils/cookieOptions"); // <-- NEW: shared cookie settings
 
 const register = async (req, res, next) => {
   try {
@@ -60,13 +61,8 @@ const login = async (req, res, next) => {
       { expiresIn: "7d" }, // Long-lived refresh token
     );
 
-    // Set secure cookies
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // true in production
-      sameSite: "none",
-    };
-
+    // Set cookies using the shared, environment-aware options
+    // (dev: sameSite "lax" + secure false | prod: sameSite "none" + secure true)
     res.cookie("accessToken", accessToken, {
       ...cookieOptions,
       maxAge: 15 * 60 * 1000,
@@ -87,15 +83,10 @@ const login = async (req, res, next) => {
 
 const logout = async (req, res, next) => {
   try {
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "none",
-    };
-
-    // Destroy the cookies by setting their expiration to a past date
-    res.cookie("accessToken", "", { ...cookieOptions, maxAge: 0 });
-    res.cookie("refreshToken", "", { ...cookieOptions, maxAge: 0 });
+    // Clear the cookies using the SAME options they were set with,
+    // otherwise the browser won't match and remove them
+    res.clearCookie("accessToken", cookieOptions);
+    res.clearCookie("refreshToken", cookieOptions);
 
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {

@@ -13,7 +13,7 @@ app.use(cookieParser()); // Crucial for reading HTTP-only cookies
 app.use(
   cors({
     origin: [
-      "http://localhost:3000", // Keep local for testing
+      "http://localhost:5173", // Keep local for testing
       "https://mern-sales-crm-assignment.vercel.app", // Add your live Vercel URL
     ],
     credentials: true, // This is CRUCIAL since your frontend sends cookies
@@ -41,12 +41,14 @@ const userRoutes = require("./routes/userRoutes");
 const leadRoutes = require("./routes/leadRoutes");
 const dealRoutes = require("./routes/dealRoutes");
 const activityRoutes = require("./routes/activityRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes"); // <-- NEW
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes); // Contains the Admin-only aggregation route
 app.use("/api/leads", leadRoutes);
 app.use("/api/deals", dealRoutes);
 app.use("/api/activities", activityRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 // Central error handler
 app.use((err, req, res, next) => {

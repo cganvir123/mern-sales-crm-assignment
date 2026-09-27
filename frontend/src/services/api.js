@@ -5,10 +5,10 @@ import axios from "axios";
 // ----------------------------------------------------
 
 // 1. Local Development URL:
-// const BASE_URL = "http://localhost:5000/api";
+const BASE_URL = "http://localhost:5000/api";
 
 // 2. Live Production URL (Render):
-const BASE_URL = "https://mern-sales-crm-assignment.onrender.com/api";
+// const BASE_URL = "https://mern-sales-crm-assignment.onrender.com/api";
 
 // ----------------------------------------------------
 
@@ -29,11 +29,17 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // NEW: Don't run refresh logic for the auth endpoints themselves.
+    // A 401 from /auth/login means "wrong email or password", not "token expired",
+    // so the error must go straight back to the Login page to be displayed.
+    const isAuthRoute = originalRequest?.url?.startsWith("/auth/");
+
     // If the error is 401 (Unauthorized) and we haven't already retried this request
     if (
       error.response &&
       error.response.status === 401 &&
-      !originalRequest._retry
+      !originalRequest._retry &&
+      !isAuthRoute // <-- NEW
     ) {
       // Set a flag so we don't get stuck in an infinite loop if the refresh also fails
       originalRequest._retry = true;

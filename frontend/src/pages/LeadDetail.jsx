@@ -4,6 +4,27 @@ import api from "../services/api";
 import Navbar from "../components/Navbar";
 import { AuthContext } from "../context/AuthContext";
 
+// Colors shared with the Dashboard
+const ACTIVITY_COLORS = {
+  Calls: "#0d6efd",
+  Meetings: "#6f42c1",
+  Notes: "#20c997",
+  "Follow-ups": "#fd7e14",
+};
+const ACTIVITY_LABEL = {
+  Calls: "Call",
+  Meetings: "Meeting",
+  Notes: "Note",
+  "Follow-ups": "Follow-up",
+};
+const STATUS_CLASS = {
+  New: "ld-status-new",
+  Contacted: "ld-status-contacted",
+  Qualified: "ld-status-qualified",
+};
+
+const formatMoney = (value) => `$${(Number(value) || 0).toLocaleString()}`;
+
 const LeadDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -66,7 +87,7 @@ const LeadDetail = () => {
     ) {
       try {
         await api.delete(`/leads/${id}`);
-        navigate("/"); // Route back to dashboard after deletion
+        navigate("/leads"); // Route back to the leads list after deletion
       } catch (error) {
         showToast("Failed to delete lead", "danger");
       }
@@ -153,307 +174,439 @@ const LeadDetail = () => {
 
   if (isLoading)
     return (
-      <div className="bg-light min-vh-100">
+      <div className="ld-page">
+        <style>{styles}</style>
         <Navbar />
+        <section className="ld-hero ld-hero-compact" />
         <div className="container text-center py-5">
-          <div className="spinner-border text-primary"></div>
+          <div className="spinner-border text-primary" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
         </div>
       </div>
     );
 
   if (!lead)
     return (
-      <div className="bg-light min-vh-100">
+      <div className="ld-page">
+        <style>{styles}</style>
         <Navbar />
-        <div className="container py-5 text-center">
-          <h3>Lead not found.</h3>
-          <Link to="/" className="btn btn-primary mt-3">
-            Back
-          </Link>
+        <section className="ld-hero ld-hero-compact" />
+        <div className="container py-5">
+          <div className="ld-card ld-notfound">
+            <h3>Lead not found</h3>
+            <p>
+              It may have been deleted, or it isn't assigned to your account.
+            </p>
+            <Link to="/leads" className="btn btn-primary mt-2">
+              Back to leads
+            </Link>
+          </div>
         </div>
       </div>
     );
 
+  // Summary numbers for the header strip (calculated from data already loaded)
+  const openValue = deals
+    .filter((d) => d.stage === "Prospect" || d.stage === "Negotiation")
+    .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const wonValue = deals
+    .filter((d) => d.stage === "Won")
+    .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+
+  const isSalesUser = user?.role === "Sales User";
+
   return (
-    <div className="bg-light min-vh-100 pb-5 position-relative">
+    <div className="ld-page">
+      <style>{styles}</style>
       <Navbar />
 
-      {/* --- NEW: Floating Notification Toast --- */}
+      {/* --- Floating Notification Toast --- */}
       <div
+        className="ld-toast-wrap"
         style={{
-          position: "fixed",
-          top: "20px",
-          right: "20px",
-          zIndex: 1050,
-          transition: "opacity 0.3s ease-in-out",
           opacity: notification.message ? 1 : 0,
           pointerEvents: notification.message ? "auto" : "none",
         }}
       >
         {notification.message && (
           <div
-            className={`alert alert-${notification.type} shadow-sm`}
+            className={`ld-toast ${
+              notification.type === "danger" ? "is-error" : "is-success"
+            }`}
             role="alert"
           >
+            <span className="ld-toast-icon" aria-hidden="true">
+              {notification.type === "danger" ? (
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              ) : (
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </span>
             {notification.message}
           </div>
         )}
       </div>
 
-      <div className="container-fluid px-4">
-        {/* Header Section */}
-        <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 bg-white p-4 rounded shadow-sm border">
-          <div>
-            <h2 className="fw-bold mb-1">{lead.name}</h2>
-            <p className="text-muted mb-0">{lead.email}</p>
-          </div>
+      {/* ---------- Navy header band ---------- */}
+      <section className="ld-hero">
+        <div className="container-fluid px-4">
+          <Link to="/leads" className="ld-back">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Back to leads
+          </Link>
 
-          <div className="d-flex gap-3 align-items-center mt-3 mt-md-0">
-            {/* Display static status badge for Admin, Interactive dropdown for Sales User */}
-            {user?.role === "Sales User" ? (
-              <>
-                <div className="d-flex align-items-center gap-2">
-                  <label className="fw-semibold small text-muted">
-                    Status:
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-4 mt-3">
+            <div className="d-flex align-items-center gap-3">
+              <span className="ld-avatar" aria-hidden="true">
+                {lead.name?.charAt(0).toUpperCase()}
+              </span>
+              <div>
+                <h2 className="ld-title">{lead.name}</h2>
+                <div className="ld-meta">
+                  <span>{lead.email}</span>
+                  {lead.assignedTo?.name && (
+                    <span>Assigned to {lead.assignedTo.name}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="d-flex flex-wrap gap-2 align-items-center">
+              {/* Interactive dropdown for Sales User, static badge for Admin */}
+              {isSalesUser ? (
+                <>
+                  <label className="ld-status-label" htmlFor="ld-status">
+                    Status
                   </label>
                   <select
-                    className="form-select form-select-sm fw-bold"
+                    id="ld-status"
+                    className="ld-status-select"
                     value={lead.status}
                     onChange={(e) => handleUpdateLeadStatus(e.target.value)}
-                    style={{ width: "130px" }}
                   >
                     <option value="New">New</option>
                     <option value="Contacted">Contacted</option>
                     <option value="Qualified">Qualified</option>
                   </select>
-                </div>
-                <button
-                  className="btn btn-sm btn-outline-danger"
-                  onClick={handleDeleteLead}
-                >
-                  Delete Lead
-                </button>
-              </>
-            ) : (
-              <div className="d-flex align-items-center gap-2">
-                <span className="fw-semibold small text-muted">Status:</span>
-                <span
-                  className={`badge ${
-                    lead.status === "New"
-                      ? "bg-info"
-                      : lead.status === "Contacted"
-                        ? "bg-warning"
-                        : "bg-success"
-                  }`}
-                >
-                  {lead.status}
-                </span>
-              </div>
-            )}
+                  <button className="ld-btn-delete" onClick={handleDeleteLead}>
+                    Delete lead
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="ld-status-label">Status</span>
+                  <span
+                    className={`ld-status ${STATUS_CLASS[lead.status] || ""}`}
+                  >
+                    <span className="ld-status-dot" />
+                    {lead.status}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Summary strip */}
+          <div className="ld-summary">
+            <div>
+              <div className="ld-summary-value">{deals.length}</div>
+              <div className="ld-summary-label">Deals</div>
+            </div>
+            <div>
+              <div className="ld-summary-value">{formatMoney(openValue)}</div>
+              <div className="ld-summary-label">Open pipeline</div>
+            </div>
+            <div>
+              <div className="ld-summary-value">{formatMoney(wonValue)}</div>
+              <div className="ld-summary-label">Revenue won</div>
+            </div>
+            <div>
+              <div className="ld-summary-value">{activities.length}</div>
+              <div className="ld-summary-label">Activities logged</div>
+            </div>
           </div>
         </div>
+      </section>
 
+      {/* ---------- Main content ---------- */}
+      <div className="container-fluid px-4 ld-main">
         <div className="row g-4">
-          {/* Left Column: Deals Pipeline */}
+          {/* Left Column: Deals */}
           <div className="col-lg-6">
-            <div className="card shadow-sm border-0 h-100">
-              <div className="card-header bg-white border-bottom pt-3 pb-2">
-                <h5 className="fw-bold m-0">Deals Pipeline</h5>
+            <div className="ld-card h-100">
+              <div className="ld-card-head">
+                <h5 className="ld-card-title">
+                  <span
+                    className="ld-card-accent"
+                    style={{ background: "#198754" }}
+                  />
+                  Deals
+                </h5>
+                <span className="ld-count">{deals.length}</span>
               </div>
-              <div className="card-body">
-                {/* Hide Add Deal form from Admins */}
-                {user?.role === "Sales User" && (
-                  <form
-                    onSubmit={handleAddDeal}
-                    className="bg-light p-3 rounded mb-4 border"
-                  >
-                    <div className="row g-2 mb-2">
-                      <div className="col-sm-6">
-                        <input
-                          type="text"
-                          className="form-control form-control-sm"
-                          placeholder="Deal Title"
-                          value={newDeal.title}
-                          onChange={(e) =>
-                            setNewDeal({ ...newDeal, title: e.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="col-sm-6">
-                        <input
-                          type="number"
-                          className="form-control form-control-sm"
-                          placeholder="Amount ($)"
-                          value={newDeal.amount}
-                          onChange={(e) =>
-                            setNewDeal({ ...newDeal, amount: e.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="row g-2 align-items-center">
-                      <div className="col-sm-8">
-                        <select
-                          className="form-select form-select-sm"
-                          value={newDeal.stage}
-                          onChange={(e) =>
-                            setNewDeal({ ...newDeal, stage: e.target.value })
-                          }
-                        >
-                          <option value="Prospect">Prospect</option>
-                          <option value="Negotiation">Negotiation</option>
-                          <option value="Won">Won</option>
-                          <option value="Lost">Lost</option>
-                        </select>
-                      </div>
-                      <div className="col-sm-4">
-                        <button
-                          type="submit"
-                          className="btn btn-sm btn-success w-100"
-                        >
-                          Add Deal
-                        </button>
-                      </div>
-                    </div>
-                  </form>
-                )}
 
-                <div className="list-group list-group-flush">
-                  {deals.length === 0 ? (
-                    <p className="text-muted small text-center">
-                      No deals active for this lead.
-                    </p>
-                  ) : (
-                    deals.map((deal) => (
-                      <div
-                        key={deal._id}
-                        className="list-group-item px-0 py-3 border-bottom d-flex flex-column gap-2"
+              {/* Hide Add Deal form from Admins */}
+              {isSalesUser && (
+                <form onSubmit={handleAddDeal} className="ld-form">
+                  <div className="ld-form-title">Add a deal</div>
+                  <div className="row g-2 mb-2">
+                    <div className="col-sm-7">
+                      <input
+                        type="text"
+                        className="ld-input"
+                        placeholder="Deal title"
+                        aria-label="Deal title"
+                        value={newDeal.title}
+                        onChange={(e) =>
+                          setNewDeal({ ...newDeal, title: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="col-sm-5">
+                      <input
+                        type="number"
+                        className="ld-input"
+                        placeholder="Amount ($)"
+                        aria-label="Amount in dollars"
+                        value={newDeal.amount}
+                        onChange={(e) =>
+                          setNewDeal({ ...newDeal, amount: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="row g-2">
+                    <div className="col-sm-7">
+                      <select
+                        className="ld-input"
+                        aria-label="Deal stage"
+                        value={newDeal.stage}
+                        onChange={(e) =>
+                          setNewDeal({ ...newDeal, stage: e.target.value })
+                        }
                       >
-                        <div className="d-flex justify-content-between align-items-start">
-                          <div>
-                            <h6 className="mb-0 fw-semibold">{deal.title}</h6>
-                            <small className="text-success fw-bold">
-                              ${deal.amount.toLocaleString()}
-                            </small>
-                          </div>
-                          {/* Hide Delete Deal button from Admins */}
-                          {user?.role === "Sales User" && (
-                            <button
-                              className="btn btn-sm text-danger p-0"
-                              onClick={() => handleDeleteDeal(deal._id)}
-                            >
-                              <small>Delete</small>
-                            </button>
-                          )}
+                        <option value="Prospect">Prospect</option>
+                        <option value="Negotiation">Negotiation</option>
+                        <option value="Won">Won</option>
+                        <option value="Lost">Lost</option>
+                      </select>
+                    </div>
+                    <div className="col-sm-5">
+                      <button
+                        type="submit"
+                        className="ld-btn-submit ld-btn-green"
+                      >
+                        Add deal
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              {deals.length === 0 ? (
+                <div className="ld-empty">No deals for this lead yet.</div>
+              ) : (
+                <ul className="ld-deals">
+                  {deals.map((deal) => (
+                    <li
+                      key={deal._id}
+                      className={`ld-deal ld-deal-${deal.stage.toLowerCase()}`}
+                    >
+                      <div className="ld-deal-info">
+                        <div className="ld-deal-title">{deal.title}</div>
+                        <div className="ld-deal-amount">
+                          {formatMoney(deal.amount)}
                         </div>
+                      </div>
+                      <div className="ld-deal-actions">
                         <select
-                          className={`form-select form-select-sm w-auto fw-semibold ${
-                            deal.stage === "Won"
-                              ? "text-success border-success"
-                              : deal.stage === "Lost"
-                                ? "text-danger border-danger"
-                                : "text-secondary"
-                          }`}
+                          className={`ld-stage ld-stage-${deal.stage.toLowerCase()}`}
+                          aria-label={`Stage for ${deal.title}`}
                           value={deal.stage}
                           onChange={(e) =>
                             handleUpdateDealStage(deal._id, e.target.value)
                           }
-                          disabled={user?.role !== "Sales User"} // Disable select for Admins
+                          disabled={!isSalesUser} // Disable select for Admins
                         >
                           <option value="Prospect">Prospect</option>
                           <option value="Negotiation">Negotiation</option>
                           <option value="Won">Won</option>
                           <option value="Lost">Lost</option>
                         </select>
+                        {/* Hide Delete Deal button from Admins */}
+                        {isSalesUser && (
+                          <button
+                            className="ld-icon-btn"
+                            onClick={() => handleDeleteDeal(deal._id)}
+                            aria-label={`Delete ${deal.title}`}
+                            title="Delete deal"
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
+                          </button>
+                        )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 
-          {/* Right Column: Activity Tracking */}
+          {/* Right Column: Activity */}
           <div className="col-lg-6">
-            <div className="card shadow-sm border-0 h-100">
-              <div className="card-header bg-white border-bottom pt-3 pb-2">
-                <h5 className="fw-bold m-0">Activity History</h5>
+            <div className="ld-card h-100">
+              <div className="ld-card-head">
+                <h5 className="ld-card-title">
+                  <span
+                    className="ld-card-accent"
+                    style={{ background: "#6f42c1" }}
+                  />
+                  Activity history
+                </h5>
+                <span className="ld-count">{activities.length}</span>
               </div>
-              <div className="card-body">
-                {/* Hide Add Activity form from Admins */}
-                {user?.role === "Sales User" && (
-                  <form
-                    onSubmit={handleAddActivity}
-                    className="bg-light p-3 rounded mb-4 border"
-                  >
-                    <div className="mb-2">
-                      <select
-                        className="form-select form-select-sm"
-                        value={newActivity.type}
-                        onChange={(e) =>
-                          setNewActivity({
-                            ...newActivity,
-                            type: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="Calls">Call</option>
-                        <option value="Meetings">Meeting</option>
-                        <option value="Notes">Note</option>
-                        <option value="Follow-ups">Follow-up</option>
-                      </select>
-                    </div>
-                    <div className="mb-2">
-                      <textarea
-                        className="form-control form-control-sm"
-                        rows="2"
-                        placeholder="Activity details..."
-                        value={newActivity.notes}
-                        onChange={(e) =>
-                          setNewActivity({
-                            ...newActivity,
-                            notes: e.target.value,
-                          })
-                        }
-                        required
-                      ></textarea>
-                    </div>
-                    <button
-                      type="submit"
-                      className="btn btn-sm btn-primary w-100"
-                    >
-                      Log Activity
-                    </button>
-                  </form>
-                )}
 
-                <div className="list-group list-group-flush">
-                  {activities.length === 0 ? (
-                    <p className="text-muted small text-center">
-                      No activities logged yet.
-                    </p>
-                  ) : (
-                    activities.map((activity) => (
-                      <div
-                        key={activity._id}
-                        className="list-group-item px-0 pb-3 mb-2 border-bottom"
-                      >
-                        <div className="d-flex w-100 justify-content-between mb-1">
-                          <strong className="text-primary">
-                            {activity.type}
-                          </strong>
-                          <small className="text-muted">
+              {/* Hide Add Activity form from Admins */}
+              {isSalesUser && (
+                <form onSubmit={handleAddActivity} className="ld-form">
+                  <div className="ld-form-title">Log an activity</div>
+                  <div className="mb-2">
+                    <select
+                      className="ld-input"
+                      aria-label="Activity type"
+                      value={newActivity.type}
+                      onChange={(e) =>
+                        setNewActivity({
+                          ...newActivity,
+                          type: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="Calls">Call</option>
+                      <option value="Meetings">Meeting</option>
+                      <option value="Notes">Note</option>
+                      <option value="Follow-ups">Follow-up</option>
+                    </select>
+                  </div>
+                  <div className="mb-2">
+                    <textarea
+                      className="ld-input ld-textarea"
+                      rows="2"
+                      placeholder="What happened? e.g. Discussed pricing, sending proposal Friday."
+                      aria-label="Activity details"
+                      value={newActivity.notes}
+                      onChange={(e) =>
+                        setNewActivity({
+                          ...newActivity,
+                          notes: e.target.value,
+                        })
+                      }
+                      required
+                    ></textarea>
+                  </div>
+                  <button type="submit" className="ld-btn-submit">
+                    Log activity
+                  </button>
+                </form>
+              )}
+
+              {activities.length === 0 ? (
+                <div className="ld-empty">No activities logged yet.</div>
+              ) : (
+                <ul className="ld-timeline">
+                  {activities.map((activity) => (
+                    <li key={activity._id}>
+                      <span
+                        className="ld-timeline-marker"
+                        style={{
+                          background:
+                            ACTIVITY_COLORS[activity.type] || "#64748b",
+                          boxShadow: `0 0 0 4px ${ACTIVITY_COLORS[activity.type] || "#64748b"}26`,
+                        }}
+                      />
+                      <div className="ld-timeline-body">
+                        <div className="ld-timeline-top">
+                          <span
+                            className="ld-timeline-type"
+                            style={{
+                              color:
+                                ACTIVITY_COLORS[activity.type] || "#64748b",
+                            }}
+                          >
+                            {ACTIVITY_LABEL[activity.type] || activity.type}
+                          </span>
+                          <span className="ld-timeline-date">
                             {new Date(activity.createdAt).toLocaleDateString()}
-                          </small>
+                            {", "}
+                            {new Date(activity.createdAt).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </span>
                         </div>
-                        <p className="mb-0 small">{activity.notes}</p>
+                        <p className="ld-timeline-notes">{activity.notes}</p>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
@@ -461,5 +614,569 @@ const LeadDetail = () => {
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Styles (scoped with "ld-" class names so they don't affect other pages)
+// ---------------------------------------------------------------------------
+const styles = `
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+.ld-page {
+  --ink: #14213d;
+  --ink-soft: #1c2c4f;
+  --ink-line: #2c3d63;
+  --page-bg: #eef1f6;
+  --text: #1e293b;
+  --muted: #64748b;
+  --line: #e2e7ef;
+  --primary: #0d6efd;
+
+  min-height: 100vh;
+  background: var(--page-bg);
+  padding-bottom: 48px;
+}
+
+.ld-hero,
+.ld-main,
+.ld-toast-wrap,
+.ld-notfound {
+  font-family: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---------- Toast ---------- */
+.ld-toast-wrap {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1050;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.ld-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(20, 33, 61, 0.2);
+  border-left: 4px solid;
+  max-width: 380px;
+}
+
+.ld-toast.is-success { border-left-color: #198754; }
+.ld-toast.is-error { border-left-color: #dc3545; }
+
+.ld-toast-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.ld-toast.is-success .ld-toast-icon { background: #dcf1e5; color: #146c43; }
+.ld-toast.is-error .ld-toast-icon { background: #fbe1e3; color: #b02a37; }
+
+/* ---------- Navy header band ---------- */
+.ld-hero {
+  background: var(--ink);
+  margin-top: -1.5rem; /* sits flush under the navbar (navbar has mb-4) */
+  padding: 22px 0 76px;
+  color: #e2e8f0;
+}
+
+.ld-hero-compact {
+  padding: 0;
+  height: 120px;
+}
+
+.ld-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a9b6cc;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ld-back:hover {
+  color: #fff;
+}
+
+.ld-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.ld-title {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+  margin: 0;
+}
+
+.ld-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  color: #a9b6cc;
+  font-size: 0.95rem;
+  margin-top: 4px;
+}
+
+.ld-status-label {
+  color: #a9b6cc;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.ld-status-select {
+  height: 38px;
+  padding: 0 34px 0 12px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #fff;
+  background-color: var(--ink-soft);
+  border: 1px solid var(--ink-line);
+  border-radius: 8px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a9b6cc' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+.ld-status-select:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.ld-status-select option {
+  color: var(--text);
+  background: #fff;
+}
+
+.ld-btn-delete {
+  height: 38px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #ff8a95;
+  background: transparent;
+  border: 1px solid rgba(255, 138, 149, 0.4);
+  border-radius: 8px;
+  margin-left: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ld-btn-delete:hover {
+  background: #dc3545;
+  border-color: #dc3545;
+  color: #fff;
+}
+
+.ld-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+}
+
+.ld-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ld-status-new { background: #dff7fc; color: #087990; }
+.ld-status-contacted { background: #fff3cd; color: #8a6100; }
+.ld-status-qualified { background: #dcf1e5; color: #146c43; }
+
+/* Summary strip */
+.ld-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 26px;
+  background: var(--ink-line);
+  border: 1px solid var(--ink-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ld-summary > div {
+  background: var(--ink-soft);
+  padding: 14px 18px;
+}
+
+.ld-summary-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.ld-summary-label {
+  font-size: 0.8rem;
+  color: #8a99b4;
+  margin-top: 2px;
+}
+
+/* ---------- Main content (overlaps the navy band) ---------- */
+.ld-main {
+  margin-top: -48px;
+  color: var(--text);
+}
+
+.ld-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 2px rgba(20, 33, 61, 0.04),
+    0 8px 24px rgba(20, 33, 61, 0.08);
+}
+
+.ld-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ld-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+
+.ld-card-accent {
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+}
+
+.ld-count {
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef1f6;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+/* Forms */
+.ld-form {
+  background: #f5f7fb;
+  border: 1px solid #e6eaf1;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.ld-form-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 10px;
+}
+
+.ld-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: #fff;
+  border: 1.5px solid #d6dce6;
+  border-radius: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ld-textarea {
+  height: auto;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.ld-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+}
+
+.ld-btn-submit {
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ld-btn-submit:hover { background: #0b5ed7; }
+.ld-btn-green { background: #198754; }
+.ld-btn-green:hover { background: #157347; }
+
+.ld-btn-submit:focus-visible,
+.ld-icon-btn:focus-visible,
+.ld-btn-delete:focus-visible,
+.ld-back:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Deals list */
+.ld-deals {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ld-deal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #e6eaf1;
+  border-left: 4px solid var(--deal-color, #6c757d);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.ld-deal-prospect { --deal-color: #6c757d; }
+.ld-deal-negotiation { --deal-color: #ffc107; }
+.ld-deal-won { --deal-color: #198754; }
+.ld-deal-lost { --deal-color: #dc3545; }
+
+.ld-deal-title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ld-deal-amount {
+  font-weight: 700;
+  color: #146c43;
+  font-size: 0.95rem;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ld-deal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ld-stage {
+  height: 34px;
+  padding: 0 30px 0 12px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  appearance: none;
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  cursor: pointer;
+}
+
+.ld-stage:disabled {
+  cursor: default;
+  background-image: none;
+  padding-right: 12px;
+  opacity: 1;
+}
+
+.ld-stage:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.ld-stage-prospect { background-color: #eceff3; color: #495057; }
+.ld-stage-negotiation { background-color: #fff3cd; color: #8a6100; }
+.ld-stage-won { background-color: #dcf1e5; color: #146c43; }
+.ld-stage-lost { background-color: #fbe1e3; color: #b02a37; }
+
+.ld-stage option {
+  color: var(--text);
+  background: #fff;
+}
+
+.ld-icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ld-icon-btn:hover {
+  background: #fbe1e3;
+  color: #b02a37;
+}
+
+/* Activity timeline */
+.ld-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  position: relative;
+}
+
+.ld-timeline li {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  padding-bottom: 18px;
+}
+
+.ld-timeline li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  bottom: 0;
+  width: 2px;
+  background: #e6eaf1;
+}
+
+.ld-timeline-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.ld-timeline-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ld-timeline-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ld-timeline-type {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.ld-timeline-date {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ld-timeline-notes {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: #334155;
+  line-height: 1.55;
+}
+
+/* Empty / not found */
+.ld-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  background: #f5f7fb;
+  border: 1px dashed #d6dce6;
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+
+.ld-notfound {
+  max-width: 460px;
+  margin: -60px auto 0;
+  text-align: center;
+  padding: 36px 28px;
+}
+
+.ld-notfound h3 {
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.ld-notfound p {
+  color: var(--muted);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 767px) {
+  .ld-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ld-deal {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-page *,
+  .ld-toast-wrap {
+    transition: none !important;
+  }
+}
+`;
 
 export default LeadDetail;
