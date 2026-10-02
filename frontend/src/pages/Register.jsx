@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import api from "../services/api";
 
-// Explains the two roles a new user can pick — matches the app's real permissions
+// Explains the two roles in the app. New sign-ups are always Sales Users;
+// an Admin account is created by promoting a user on the server.
 const ROLES_INFO = [
   {
     title: "Sales User",
@@ -39,7 +40,6 @@ const Register = () => {
     name: "",
     email: "",
     password: "",
-    role: "Sales User", // Defaulting to the standard role
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
@@ -86,8 +86,8 @@ const Register = () => {
         <div className="auth-brand-copy">
           <h1>Set up your account and start working your leads.</h1>
           <p>
-            Create an account for yourself or a teammate. Pick the role that
-            matches what they need to see.
+            New accounts start as Sales Users. Ask your admin if you need access
+            to Team Overview.
           </p>
         </div>
 
@@ -184,7 +184,8 @@ const Register = () => {
                   autoComplete="new-password"
                   value={formData.password}
                   onChange={handleChange}
-                  minLength="6"
+                  minLength={8}
+                  maxLength={72}
                   required
                   aria-describedby="reg-password-hint"
                 />
@@ -198,33 +199,9 @@ const Register = () => {
                 </button>
               </div>
               <div id="reg-password-hint" className="auth-hint">
-                At least 6 characters.
+                At least 8 characters.
               </div>
             </div>
-
-            <fieldset className="auth-field auth-roles">
-              <legend>Role</legend>
-              <div className="auth-role-grid">
-                {["Sales User", "Admin"].map((role) => (
-                  <label
-                    key={role}
-                    className={`auth-role ${
-                      formData.role === role ? "is-selected" : ""
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="role"
-                      value={role}
-                      checked={formData.role === role}
-                      onChange={handleChange}
-                    />
-                    <span className="auth-role-radio" aria-hidden="true" />
-                    <span className="auth-role-label">{role}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
 
             <button type="submit" className="auth-submit" disabled={isLoading}>
               {isLoading && (
@@ -398,10 +375,7 @@ const styles = `
   margin-bottom: 18px;
 }
 
-/* CHANGED: "> label" so this only styles the field labels above inputs,
-   not the role cards inside .auth-role-grid */
-.auth-field > label,
-.auth-roles legend {
+.auth-field > label {
   display: block;
   font-size: 0.875rem;
   font-weight: 600;
@@ -468,82 +442,6 @@ const styles = `
 
 .auth-toggle:focus-visible,
 .auth-switch a:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-/* Role picker (radio cards) */
-.auth-roles {
-  border: none;
-  padding: 0;
-  margin: 0 0 22px;
-}
-
-.auth-role-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.auth-role {
-  position: relative;
-  display: flex; /* radio circle and text on one line */
-  align-items: center;
-  gap: 10px;
-  height: 46px;
-  padding: 0 14px;
-  margin: 0;
-  border: 1.5px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text);
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.auth-role:hover {
-  border-color: #b3bfd0;
-}
-
-.auth-role input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.auth-role-radio {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.5px solid #9aa6b8;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-}
-
-.auth-role-label {
-  line-height: 1;
-}
-
-.auth-role.is-selected {
-  border-color: var(--primary);
-  background: #f3f7ff;
-}
-
-.auth-role.is-selected .auth-role-radio {
-  border-color: var(--primary);
-}
-
-.auth-role.is-selected .auth-role-radio::after {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--primary);
-}
-
-.auth-role:has(input:focus-visible) {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }

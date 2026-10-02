@@ -1,6 +1,6 @@
-import { useState, useContext } from "react";
-import { useNavigate, Link, Navigate } from "react-router-dom";
-import api from "../services/api";
+import { useState, useContext, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import api, { getErrorMessage } from "../services/api";
 import Navbar from "../components/Navbar";
 import { AuthContext } from "../context/AuthContext";
 
@@ -15,19 +15,37 @@ const CreateLead = () => {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
 
+  const isAdmin = user?.role === "Admin";
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    phone: "",
     status: "New",
+    assignedTo: "",
   });
 
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [salesUsers, setSalesUsers] = useState([]);
 
-  // SECURITY CHECK: If an Admin tries to force their way to this URL, boot them out.
-  if (user?.role !== "Sales User") {
-    return <Navigate to="/leads" replace />;
-  }
+  // Admins must choose which Sales User owns the lead
+  useEffect(() => {
+    if (!isAdmin) return;
+    let ignore = false;
+    api
+      .get("/users/sales-users/options")
+      .then((res) => {
+        if (!ignore) setSalesUsers(res.data);
+      })
+      .catch((err) => {
+        if (!ignore)
+          setError(getErrorMessage(err, "Could not load sales users"));
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [isAdmin]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,14 +53,17 @@ const CreateLead = () => {
     setIsLoading(true);
 
     try {
-      await api.post("/leads", formData);
-      navigate("/leads"); // Head back to the leads list on success
+      // Only send fields that have a value (empty phone is left out,
+      // and Sales Users never send assignedTo)
+      const payload = Object.fromEntries(
+        Object.entries(formData).filter(([, value]) => value !== ""),
+      );
+      const response = await api.post("/leads", payload);
+      navigate(`/leads/${response.data._id}`); // Open the new lead
     } catch (err) {
-      if (err.response && err.response.data.errors) {
-        setError(err.response.data.errors[0].msg);
-      } else {
-        setError("Failed to create lead. Please try again.");
-      }
+      setError(
+        getErrorMessage(err, "Failed to create lead. Please try again."),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -74,8 +95,10 @@ const CreateLead = () => {
           </Link>
           <h3 className="cl-hero-title">Add a new lead</h3>
           <p className="cl-hero-subtitle">
-            The lead will be assigned to you. You can add deals and log activity
-            from its page after saving.
+            {isAdmin
+              ? "Choose which sales user owns this lead."
+              : "The lead will be assigned to you."}{" "}
+            You can add deals and log activity from its page after saving.
           </p>
         </div>
       </section>
@@ -133,6 +156,43 @@ const CreateLead = () => {
                 required
               />
             </div>
+
+            <div className="cl-field">
+              <label htmlFor="cl-phone">Phone (optional)</label>
+              <input
+                id="cl-phone"
+                type="tel"
+                className="cl-input"
+                placeholder="+91 98765 43210"
+                maxLength={30}
+                value={formData.phone}
+                onChange={(e) =>
+                  setFormData({ ...formData, phone: e.target.value })
+                }
+              />
+            </div>
+
+            {isAdmin && (
+              <div className="cl-field">
+                <label htmlFor="cl-assignee">Assign to</label>
+                <select
+                  id="cl-assignee"
+                  className="cl-input"
+                  value={formData.assignedTo}
+                  onChange={(e) =>
+                    setFormData({ ...formData, assignedTo: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Select a sales user...</option>
+                  {salesUsers.map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <fieldset className="cl-field cl-status-field">
               <legend>Initial status</legend>

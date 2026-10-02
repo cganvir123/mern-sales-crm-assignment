@@ -7,7 +7,7 @@ const activitySchema = new mongoose.Schema(
       enum: ["Calls", "Meetings", "Notes", "Follow-ups"], // Required activity types
       required: true,
     },
-    notes: { type: String, required: true },
+    notes: { type: String, required: true, trim: true },
     leadId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lead",
@@ -16,5 +16,7 @@ const activitySchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+activitySchema.index({ leadId: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Activity", activitySchema);

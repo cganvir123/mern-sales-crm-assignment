@@ -1,27 +1,31 @@
 const User = require("../models/User");
 
-// Admin only: Get all sales users and their assigned leads[cite: 2]
+// Admin only: sales users with a SLIM list of their leads (only what the
+// Team Overview page shows), instead of every field of every lead.
 const getSalesUsersWithLeads = async (req, res, next) => {
   try {
     const usersWithLeads = await User.aggregate([
+      { $match: { role: "Sales User" } },
       {
-        // Step 1: Filter only for Sales Users (WHERE clause equivalent)
-        $match: { role: "Sales User" },
-      },
-      {
-        // Step 2: Join the leads collection (LEFT JOIN equivalent)
         $lookup: {
-          from: "leads", // The target collection name in MongoDB
-          localField: "_id", // Primary key in the Users collection
-          foreignField: "assignedTo", // Foreign key in the Leads collection
-          as: "assignedLeads", // Alias for the joined data array
+          from: "leads",
+          let: { userId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$assignedTo", "$$userId"] } } },
+            { $sort: { createdAt: -1 } },
+            { $project: { name: 1, status: 1 } },
+          ],
+          as: "assignedLeads",
         },
       },
+      // Whitelist user fields (never password or tokenVersion)
       {
-        // Step 3: Select which fields to return (SELECT clause equivalent)
         $project: {
-          password: 0, // Exclude the hashed password for security
-          __v: 0, // Exclude Mongoose version key
+          name: 1,
+          email: 1,
+          role: 1,
+          createdAt: 1,
+          assignedLeads: 1,
         },
       },
     ]);
@@ -32,14 +36,26 @@ const getSalesUsersWithLeads = async (req, res, next) => {
   }
 };
 
-// Get all users (Admin only)
+// Admin only: all users
 const getAllUsers = async (req, res, next) => {
   try {
-    const users = await User.find().select("-password");
+    const users = await User.find().select("name email role createdAt");
     res.status(200).json(users);
   } catch (error) {
     next(error);
   }
 };
 
-module.exports = { getSalesUsersWithLeads, getAllUsers };
+// Admin only: lightweight list for "Assign to" dropdowns
+const getSalesUserOptions = async (req, res, next) => {
+  try {
+    const users = await User.find({ role: "Sales User" })
+      .select("name email")
+      .sort({ name: 1 });
+    res.status(200).json(users);
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getSalesUsersWithLeads, getAllUsers, getSalesUserOptions };

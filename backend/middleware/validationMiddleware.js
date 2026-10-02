@@ -1,69 +1,154 @@
-const { check, validationResult } = require("express-validator");
+const { check, param, query, validationResult } = require("express-validator");
+
+const LEAD_STATUSES = ["New", "Contacted", "Qualified"];
+const DEAL_STAGES = ["Prospect", "Negotiation", "Won", "Lost"];
+const ACTIVITY_TYPES = ["Calls", "Meetings", "Notes", "Follow-ups"];
 
 // Centralized error responder for validation
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    // Ties into the required proper status codes
-    return res.status(400).json({ errors: errors.array() });
+    const list = errors.array();
+    // "message" matches every other error response; "errors" is kept for detail
+    return res.status(400).json({ message: list[0].msg, errors: list });
   }
   next();
 };
 
-// --- Auth Validation Rules ---
-const validateRegister = [
-  check("name", "Name is required").not().isEmpty(),
-  check("email", "Please include a valid email").isEmail(),
-  check("password", "Password must be at least 6 characters").isLength({
-    min: 6,
-  }),
+// Reusable check for :id / :leadId URL params
+const validateIdParam = (name = "id") => [
+  param(name, `Invalid ${name}`).isMongoId(),
   handleValidationErrors,
 ];
 
+// Trims + lowercases, so emails are always stored and compared the same way
+const emailField = (field = "email") =>
+  check(field, "Please include a valid email")
+    .isString()
+    .trim()
+    .toLowerCase()
+    .isEmail()
+    .isLength({ max: 254 });
+
+// --- Auth Validation Rules ---
+const validateRegister = [
+  check("name", "Name is required (max 100 characters)")
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 100 }),
+  emailField(),
+  check("password", "Password must be 8 to 72 characters")
+    .isString()
+    .isLength({ min: 8 })
+    // bcrypt ignores everything after 72 bytes
+    .custom((value) => Buffer.byteLength(value, "utf8") <= 72),
+  handleValidationErrors,
+];
+
+// No length rules here: older accounts may have shorter passwords
 const validateLogin = [
-  check("email", "Please include a valid email").isEmail(),
-  check("password", "Password is required").exists(),
+  emailField(),
+  check("password", "Password is required").isString().notEmpty(),
   handleValidationErrors,
 ];
 
 // --- Lead Validation Rules ---
+// Create: name and email are required
 const validateLead = [
-  check("name", "Name is required").not().isEmpty(),
-  check("email", "Please include a valid email").isEmail(),
-  check("status", "Invalid status")
+  check("name", "Name is required (max 150 characters)")
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 150 }),
+  emailField(),
+  check("phone", "Phone must be at most 30 characters")
     .optional()
-    .isIn(["New", "Contacted", "Qualified"]),
+    .isString()
+    .trim()
+    .isLength({ max: 30 }),
+  check("status", "Invalid status").optional().isIn(LEAD_STATUSES),
+  check("assignedTo", "Invalid assignee").optional().isMongoId(),
+  handleValidationErrors,
+];
+
+// Update: every field is optional, so a status change can send just { status }
+const validateLeadUpdate = [
+  check("name", "Name cannot be empty (max 150 characters)")
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 150 }),
+  emailField().optional(),
+  check("phone", "Phone must be at most 30 characters")
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 30 }),
+  check("status", "Invalid status").optional().isIn(LEAD_STATUSES),
+  check("assignedTo", "Invalid assignee").optional().isMongoId(),
+  handleValidationErrors,
+];
+
+const validateLeadQuery = [
+  query("status", "Invalid status")
+    .optional({ values: "falsy" })
+    .isIn(LEAD_STATUSES),
+  query("search", "Search must be text").optional().isString(),
+  query("page").optional().isInt({ min: 1 }),
+  query("limit").optional().isInt({ min: 1, max: 100 }),
   handleValidationErrors,
 ];
 
 // --- Deal Validation Rules ---
 const validateDeal = [
-  check("title", "Title is required").not().isEmpty(),
-  check("amount", "Amount must be a valid number").isNumeric(),
-  check("stage", "Invalid stage")
-    .optional()
-    .isIn(["Prospect", "Negotiation", "Won", "Lost"]),
+  check("title", "Title is required (max 150 characters)")
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 150 }),
+  check("amount", "Amount must be a number of 0 or more").isFloat({ min: 0 }),
+  check("stage", "Invalid stage").optional().isIn(DEAL_STAGES),
   check("leadId", "Valid Lead ID is required").isMongoId(),
+  handleValidationErrors,
+];
+
+const validateDealStage = [
+  param("id", "Invalid deal id").isMongoId(),
+  check("stage", "Invalid stage").isIn(DEAL_STAGES),
+  handleValidationErrors,
+];
+
+const validateDealQuery = [
+  query("stage", "Invalid stage")
+    .optional({ values: "falsy" })
+    .isIn(DEAL_STAGES),
+  query("leadId", "Invalid lead id").optional({ values: "falsy" }).isMongoId(),
   handleValidationErrors,
 ];
 
 // --- Activity Validation Rules ---
 const validateActivity = [
-  check("type", "Invalid activity type").isIn([
-    "Calls",
-    "Meetings",
-    "Notes",
-    "Follow-ups",
-  ]),
-  check("notes", "Notes are required").not().isEmpty(),
+  check("type", "Invalid activity type").isIn(ACTIVITY_TYPES),
+  check("notes", "Notes are required (max 2000 characters)")
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 2000 }),
   check("leadId", "Valid Lead ID is required").isMongoId(),
   handleValidationErrors,
 ];
 
 module.exports = {
+  validateIdParam,
   validateRegister,
   validateLogin,
   validateLead,
+  validateLeadUpdate,
+  validateLeadQuery,
   validateDeal,
+  validateDealStage,
+  validateDealQuery,
   validateActivity,
 };

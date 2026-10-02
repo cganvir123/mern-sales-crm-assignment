@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
 import Navbar from "../components/Navbar";
+import { formatMoney } from "../utils/format";
 
 // Stage colors shared with the Dashboard and Lead Detail pages
 const STAGE_META = {
@@ -11,7 +12,6 @@ const STAGE_META = {
   Lost: { color: "#dc3545", tint: "#fbe1e3", text: "#b02a37" },
 };
 
-const formatMoney = (value) => `$${(Number(value) || 0).toLocaleString()}`;
 const sumAmounts = (list) =>
   list.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
@@ -20,19 +20,25 @@ const SalesPipeline = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchDeals();
-  }, []);
+    // Ignore the response if the page unmounts before it arrives
+    let ignore = false;
 
-  const fetchDeals = async () => {
-    try {
-      const response = await api.get("/deals");
-      setDeals(response.data);
-    } catch (error) {
-      console.error("Error fetching pipeline deals:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const fetchDeals = async () => {
+      try {
+        const response = await api.get("/deals");
+        if (!ignore) setDeals(response.data);
+      } catch (error) {
+        console.error("Error fetching pipeline deals:", error);
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+
+    fetchDeals();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   // Group deals by the stages mandated in the PDF
   const groupedDeals = {

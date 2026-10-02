@@ -2,23 +2,32 @@ const express = require("express");
 const router = express.Router();
 const {
   getLeads,
-  getLeadById, // Newly added
+  getLeadById,
   createLead,
   updateLead,
   deleteLead,
 } = require("../controllers/leadController");
 const { protect } = require("../middleware/authMiddleware");
-const { validateLead } = require("../middleware/validationMiddleware");
+const {
+  validateIdParam,
+  validateLead,
+  validateLeadUpdate,
+  validateLeadQuery,
+} = require("../middleware/validationMiddleware");
 
 // All lead routes require authentication
 router.use(protect);
 
-router.route("/").get(getLeads).post(validateLead, createLead);
+router
+  .route("/")
+  .get(validateLeadQuery, getLeads)
+  .post(validateLead, createLead);
 
 router
   .route("/:id")
-  .get(getLeadById) // Applied the missing RESTful route here
-  .patch(validateLead, updateLead)
-  .delete(deleteLead);
+  .get(validateIdParam(), getLeadById)
+  // Partial-update validation: sending just { status } is now allowed
+  .patch(validateIdParam(), validateLeadUpdate, updateLead)
+  .delete(validateIdParam(), deleteLead);
 
 module.exports = router;

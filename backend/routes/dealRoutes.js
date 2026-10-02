@@ -3,19 +3,27 @@ const router = express.Router();
 const {
   createDeal,
   updateDealStage,
-  getDealsByStage,
+  getDeals,
   deleteDeal,
 } = require("../controllers/dealController");
 const { protect } = require("../middleware/authMiddleware");
-const { validateDeal } = require("../middleware/validationMiddleware");
+const {
+  validateIdParam,
+  validateDeal,
+  validateDealStage,
+  validateDealQuery,
+} = require("../middleware/validationMiddleware");
 
-router.use(protect); // Ensure only authenticated users can access[cite: 5]
+router.use(protect); // Only authenticated users
 
-router.route("/").post(validateDeal, createDeal).get(getDealsByStage); // Uses ?stage= query parameter[cite: 5]
+router
+  .route("/")
+  .post(validateDeal, createDeal)
+  .get(validateDealQuery, getDeals); // Supports ?stage= and ?leadId=
 
 router
   .route("/:id")
-  .patch(updateDealStage) // PATCH is best practice for partial updates like a stage change[cite: 5]
-  .delete(deleteDeal);
+  .patch(validateDealStage, updateDealStage) // Validates id + stage enum
+  .delete(validateIdParam(), deleteDeal);
 
 module.exports = router;

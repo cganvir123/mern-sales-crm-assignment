@@ -31,27 +31,36 @@ const Leads = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      fetchLeads();
-    }, 500);
+    // "ignore" guards against out-of-order responses: if the user keeps
+    // typing, a slow response for an older search can no longer overwrite
+    // the results of a newer one.
+    let ignore = false;
 
-    return () => clearTimeout(delayDebounceFn);
+    const fetchLeads = async () => {
+      setIsLoading(true);
+      try {
+        // Let axios build and URL-encode the query string, so searches
+        // containing "&", "#" or "+" don't break the request
+        const response = await api.get("/leads", {
+          params: { search, status, page, limit: 5 },
+        });
+        if (ignore) return;
+        setLeads(response.data.leads);
+        setTotalPages(response.data.pagination.pages);
+      } catch (error) {
+        if (!ignore) console.error("Error fetching leads:", error);
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+
+    const delayDebounceFn = setTimeout(fetchLeads, 500);
+
+    return () => {
+      ignore = true;
+      clearTimeout(delayDebounceFn);
+    };
   }, [search, status, page]);
-
-  const fetchLeads = async () => {
-    setIsLoading(true);
-    try {
-      const response = await api.get(
-        `/leads?search=${search}&status=${status}&page=${page}&limit=5`,
-      );
-      setLeads(response.data.leads);
-      setTotalPages(response.data.pagination.pages);
-    } catch (error) {
-      console.error("Error fetching leads:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const isFiltering = search !== "" || status !== "";
 
@@ -73,15 +82,9 @@ const Leads = () => {
               </p>
             </div>
 
-            {/* 2. Hide the Add button from Admins */}
-            {user?.role === "Sales User" && (
-              <Link
-                to="/leads/new"
-                className="btn btn-primary leads-btn-primary"
-              >
-                + Add New Lead
-              </Link>
-            )}
+            <Link to="/leads/new" className="btn btn-primary leads-btn-primary">
+              + Add New Lead
+            </Link>
           </div>
         </div>
       </section>

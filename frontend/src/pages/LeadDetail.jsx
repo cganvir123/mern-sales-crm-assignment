@@ -1,8 +1,11 @@
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import Modal from "react-bootstrap/Modal";
 import api from "../services/api";
+import { formatMoney } from "../utils/format";
 import Navbar from "../components/Navbar";
 import { AuthContext } from "../context/AuthContext";
+import { useConfirm } from "../components/ConfirmDialog";
 
 // Colors shared with the Dashboard
 const ACTIVITY_COLORS = {
@@ -17,18 +20,12 @@ const ACTIVITY_LABEL = {
   Notes: "Note",
   "Follow-ups": "Follow-up",
 };
-const STATUS_CLASS = {
-  New: "ld-status-new",
-  Contacted: "ld-status-contacted",
-  Qualified: "ld-status-qualified",
-};
-
-const formatMoney = (value) => `$${(Number(value) || 0).toLocaleString()}`;
 
 const LeadDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext); // Pull user from context for role checks
+  const confirm = useConfirm(); // Themed confirmation dialog
 
   const [lead, setLead] = useState(null);
   const [deals, setDeals] = useState([]);
@@ -45,64 +42,116 @@ const LeadDetail = () => {
   });
   const [newActivity, setNewActivity] = useState({ type: "Calls", notes: "" });
 
-  // --- NEW: Helper function to show notifications ---
-  const showToast = (message, type = "success") => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification({ message: "", type: "" }), 3000); // Auto hide after 3 seconds
-  };
+  // Edit-lead modal
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", email: "", phone: "" });
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Admin only: sales users for the "Assigned to" dropdown
+  const isAdmin = user?.role === "Admin";
+  const [salesUsers, setSalesUsers] = useState([]);
 
   useEffect(() => {
-    fetchLeadData();
-  }, [id]);
+    if (!isAdmin) return;
+    let ignore = false;
+    api
+      .get("/users/sales-users/options")
+      .then((res) => {
+        if (!ignore) setSalesUsers(res.data);
+      })
+      .catch((err) => console.error("Could not load sales users", err));
+    return () => {
+      ignore = true;
+    };
+  }, [isAdmin]);
 
-  const fetchLeadData = async () => {
-    setIsLoading(true);
-    try {
-      const [leadRes, activitiesRes, dealsRes] = await Promise.all([
-        api.get(`/leads/${id}`),
-        api.get(`/activities/lead/${id}`),
-        api.get("/deals"),
-      ]);
+  // --- Helper function to show notifications ---
+  // The ref remembers the pending hide-timer so a new toast restarts the
+  // 3-second countdown instead of being hidden early by the previous one.
+  const toastTimer = useRef(null);
 
-      setLead(leadRes.data);
-      setActivities(activitiesRes.data);
-
-      const leadDeals = dealsRes.data.filter(
-        (deal) => (deal.leadId._id || deal.leadId) === id,
-      );
-      setDeals(leadDeals);
-    } catch (error) {
-      console.error("Error fetching lead details:", error);
-    } finally {
-      setIsLoading(false);
-    }
+  const showToast = (message, type = "success") => {
+    clearTimeout(toastTimer.current);
+    setNotification({ message, type });
+    toastTimer.current = setTimeout(
+      () => setNotification({ message: "", type: "" }),
+      3000,
+    );
   };
+
+  // Clear any pending toast timer when leaving the page
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  // Pulls the most useful message out of an API error
+  const apiError = (error, fallback) =>
+    error.response?.data?.message ||
+    error.response?.data?.errors?.[0]?.msg ||
+    fallback;
+
+  useEffect(() => {
+    // Ignore responses that arrive after the user has moved to another lead
+    let ignore = false;
+
+    const fetchLeadData = async () => {
+      try {
+        const [leadRes, activitiesRes, dealsRes] = await Promise.all([
+          api.get(`/leads/${id}`),
+          api.get(`/activities/lead/${id}`),
+          // Only this lead's deals, instead of downloading every deal
+          api.get("/deals", { params: { leadId: id } }),
+        ]);
+        if (ignore) return;
+
+        setLead(leadRes.data);
+        setActivities(activitiesRes.data);
+        setDeals(dealsRes.data);
+      } catch (error) {
+        if (ignore) return;
+        console.error("Error fetching lead details:", error);
+        setLead(null); // Shows the "Lead not found" card
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+
+    fetchLeadData();
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
 
   // --- Lead Actions ---
   const handleDeleteLead = async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to delete this lead? This cannot be undone.",
-      )
-    ) {
-      try {
-        await api.delete(`/leads/${id}`);
-        navigate("/leads"); // Route back to the leads list after deletion
-      } catch (error) {
-        showToast("Failed to delete lead", "danger");
-      }
+    // Tell the user exactly what will be removed along with the lead
+    const extras = [];
+    if (deals.length)
+      extras.push(`${deals.length} deal${deals.length > 1 ? "s" : ""}`);
+    if (activities.length)
+      extras.push(
+        `${activities.length} activit${activities.length > 1 ? "ies" : "y"}`,
+      );
+
+    const ok = await confirm({
+      title: `Delete ${lead.name}?`,
+      message: extras.length
+        ? `This also deletes its ${extras.join(" and ")}. This cannot be undone.`
+        : "This cannot be undone.",
+      confirmText: "Delete lead",
+    });
+    if (!ok) return;
+
+    try {
+      await api.delete(`/leads/${id}`);
+      navigate("/leads"); // Route back to the leads list after deletion
+    } catch (error) {
+      showToast(apiError(error, "Failed to delete lead"), "danger");
     }
   };
 
   const handleUpdateLeadStatus = async (newStatus) => {
     try {
-      // Send the existing name and email along with the new status
-      // to satisfy strict backend validation rules
-      const response = await api.patch(`/leads/${id}`, {
-        name: lead.name,
-        email: lead.email,
-        status: newStatus,
-      });
+      // The backend now accepts partial updates, so only the status is sent
+      const response = await api.patch(`/leads/${id}`, { status: newStatus });
 
       setLead(response.data);
       showToast("Lead status updated successfully!", "success"); // NEW: Success notification
@@ -119,6 +168,43 @@ const LeadDetail = () => {
     }
   };
 
+  const openEdit = () => {
+    setEditForm({
+      name: lead.name || "",
+      email: lead.email || "",
+      phone: lead.phone || "",
+    });
+    setShowEdit(true);
+  };
+
+  const handleSaveLead = async (e) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      const response = await api.patch(`/leads/${id}`, editForm);
+      setLead(response.data);
+      setShowEdit(false);
+      showToast("Lead details updated!", "success");
+    } catch (error) {
+      showToast(apiError(error, "Failed to update lead"), "danger");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReassign = async (assignedTo) => {
+    try {
+      const response = await api.patch(`/leads/${id}`, { assignedTo });
+      setLead(response.data);
+      showToast(
+        `Lead reassigned to ${response.data.assignedTo?.name}`,
+        "success",
+      );
+    } catch (error) {
+      showToast(apiError(error, "Failed to reassign lead"), "danger");
+    }
+  };
+
   // --- Deal Actions ---
   const handleAddDeal = async (e) => {
     e.preventDefault();
@@ -128,7 +214,7 @@ const LeadDetail = () => {
       setNewDeal({ title: "", amount: "", stage: "Prospect" });
       showToast("Deal added successfully!", "success");
     } catch (error) {
-      showToast("Failed to add deal", "danger");
+      showToast(apiError(error, "Failed to add deal"), "danger");
     }
   };
 
@@ -140,19 +226,25 @@ const LeadDetail = () => {
       );
       showToast("Deal stage updated!", "success");
     } catch (error) {
-      showToast("Failed to update deal stage", "danger");
+      showToast(apiError(error, "Failed to update deal stage"), "danger");
     }
   };
 
   const handleDeleteDeal = async (dealId) => {
-    if (window.confirm("Delete this deal?")) {
-      try {
-        await api.delete(`/deals/${dealId}`);
-        setDeals(deals.filter((deal) => deal._id !== dealId));
-        showToast("Deal deleted successfully!", "success");
-      } catch (error) {
-        showToast("Failed to delete deal", "danger");
-      }
+    const deal = deals.find((d) => d._id === dealId);
+    const ok = await confirm({
+      title: `Delete "${deal?.title}"?`,
+      message: `This ${formatMoney(deal?.amount)} deal will be permanently removed.`,
+      confirmText: "Delete deal",
+    });
+    if (!ok) return;
+
+    try {
+      await api.delete(`/deals/${dealId}`);
+      setDeals((current) => current.filter((d) => d._id !== dealId));
+      showToast("Deal deleted successfully!", "success");
+    } catch (error) {
+      showToast(apiError(error, "Failed to delete deal"), "danger");
     }
   };
 
@@ -168,7 +260,7 @@ const LeadDetail = () => {
       setNewActivity({ type: "Calls", notes: "" });
       showToast("Activity logged successfully!", "success");
     } catch (error) {
-      showToast("Failed to log activity", "danger");
+      showToast(apiError(error, "Failed to log activity"), "danger");
     }
   };
 
@@ -300,6 +392,11 @@ const LeadDetail = () => {
                 <h2 className="ld-title">{lead.name}</h2>
                 <div className="ld-meta">
                   <span>{lead.email}</span>
+                  {lead.phone && (
+                    <a href={`tel:${lead.phone}`} className="ld-phone">
+                      {lead.phone}
+                    </a>
+                  )}
                   {lead.assignedTo?.name && (
                     <span>Assigned to {lead.assignedTo.name}</span>
                   )}
@@ -308,37 +405,46 @@ const LeadDetail = () => {
             </div>
 
             <div className="d-flex flex-wrap gap-2 align-items-center">
-              {/* Interactive dropdown for Sales User, static badge for Admin */}
-              {isSalesUser ? (
+              {/* Admin only: move the lead to another sales user */}
+              {isAdmin && (
                 <>
-                  <label className="ld-status-label" htmlFor="ld-status">
-                    Status
+                  <label className="ld-status-label" htmlFor="ld-assignee">
+                    Owner
                   </label>
                   <select
-                    id="ld-status"
+                    id="ld-assignee"
                     className="ld-status-select"
-                    value={lead.status}
-                    onChange={(e) => handleUpdateLeadStatus(e.target.value)}
+                    value={lead.assignedTo?._id || ""}
+                    onChange={(e) => handleReassign(e.target.value)}
                   >
-                    <option value="New">New</option>
-                    <option value="Contacted">Contacted</option>
-                    <option value="Qualified">Qualified</option>
+                    {salesUsers.map((u) => (
+                      <option key={u._id} value={u._id}>
+                        {u.name}
+                      </option>
+                    ))}
                   </select>
-                  <button className="ld-btn-delete" onClick={handleDeleteLead}>
-                    Delete lead
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="ld-status-label">Status</span>
-                  <span
-                    className={`ld-status ${STATUS_CLASS[lead.status] || ""}`}
-                  >
-                    <span className="ld-status-dot" />
-                    {lead.status}
-                  </span>
                 </>
               )}
+
+              <label className="ld-status-label" htmlFor="ld-status">
+                Status
+              </label>
+              <select
+                id="ld-status"
+                className="ld-status-select"
+                value={lead.status}
+                onChange={(e) => handleUpdateLeadStatus(e.target.value)}
+              >
+                <option value="New">New</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Qualified">Qualified</option>
+              </select>
+              <button className="ld-btn-edit" onClick={openEdit}>
+                Edit
+              </button>
+              <button className="ld-btn-delete" onClick={handleDeleteLead}>
+                Delete lead
+              </button>
             </div>
           </div>
 
@@ -403,8 +509,8 @@ const LeadDetail = () => {
                       <input
                         type="number"
                         className="ld-input"
-                        placeholder="Amount ($)"
-                        aria-label="Amount in dollars"
+                        placeholder="Amount (₹)"
+                        aria-label="Amount"
                         value={newDeal.amount}
                         onChange={(e) =>
                           setNewDeal({ ...newDeal, amount: e.target.value })
@@ -611,6 +717,78 @@ const LeadDetail = () => {
           </div>
         </div>
       </div>
+
+      {/* ---------- Edit lead modal ---------- */}
+      <Modal show={showEdit} onHide={() => setShowEdit(false)} centered>
+        <form onSubmit={handleSaveLead}>
+          <Modal.Header closeButton>
+            <Modal.Title>Edit lead</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <div className="mb-3">
+              <label htmlFor="edit-name" className="form-label">
+                Name
+              </label>
+              <input
+                id="edit-name"
+                className="form-control"
+                value={editForm.name}
+                maxLength={150}
+                required
+                onChange={(e) =>
+                  setEditForm({ ...editForm, name: e.target.value })
+                }
+              />
+            </div>
+            <div className="mb-3">
+              <label htmlFor="edit-email" className="form-label">
+                Email
+              </label>
+              <input
+                id="edit-email"
+                type="email"
+                className="form-control"
+                value={editForm.email}
+                required
+                onChange={(e) =>
+                  setEditForm({ ...editForm, email: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label htmlFor="edit-phone" className="form-label">
+                Phone
+              </label>
+              <input
+                id="edit-phone"
+                type="tel"
+                className="form-control"
+                value={editForm.phone}
+                maxLength={30}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, phone: e.target.value })
+                }
+              />
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => setShowEdit(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving..." : "Save changes"}
+            </button>
+          </Modal.Footer>
+        </form>
+      </Modal>
     </div>
   );
 };
@@ -786,6 +964,33 @@ const styles = `
   margin-left: 6px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+}
+
+.ld-btn-edit {
+  height: 38px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 8px;
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+.ld-btn-edit:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ld-phone {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ld-phone:hover {
+  text-decoration: underline;
 }
 
 .ld-btn-delete:hover {

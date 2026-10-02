@@ -2,9 +2,9 @@ const mongoose = require("mongoose");
 
 const leadSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
-    email: { type: String, required: true },
-    phone: { type: String },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, trim: true, lowercase: true },
+    phone: { type: String, trim: true },
     status: {
       type: String,
       enum: ["New", "Contacted", "Qualified"],
@@ -19,5 +19,8 @@ const leadSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// Nearly every lead query filters by owner and sorts newest first
+leadSchema.index({ assignedTo: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Lead", leadSchema);

@@ -1,66 +1,27 @@
-const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const rateLimit = require("express-rate-limit");
 require("dotenv").config();
+const app = require("./app");
 
-const app = express();
+const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(express.json());
-app.use(cookieParser()); // Crucial for reading HTTP-only cookies
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173", // Keep local for testing
-      "https://mern-sales-crm-assignment.vercel.app", // Add your live Vercel URL
-    ],
-    credentials: true, // This is CRUCIAL since your frontend sends cookies
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-
-// 2. Define your rate limiter configuration here
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login requests per window
-  message: {
-    message:
-      "Too many login attempts from this IP, please try again after 15 minutes",
-  }, // Match your error handler format
-});
-
-// 3. Apply the limiter specifically to your login route
-app.use("/api/auth/login", loginLimiter);
-
-// Routes
-const authRoutes = require("./routes/authRoutes");
-const userRoutes = require("./routes/userRoutes");
-const leadRoutes = require("./routes/leadRoutes");
-const dealRoutes = require("./routes/dealRoutes");
-const activityRoutes = require("./routes/activityRoutes");
-const dashboardRoutes = require("./routes/dashboardRoutes"); // <-- NEW
-
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes); // Contains the Admin-only aggregation route
-app.use("/api/leads", leadRoutes);
-app.use("/api/deals", dealRoutes);
-app.use("/api/activities", activityRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-
-// Central error handler
-app.use((err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
-  res.status(statusCode).json({ message: err.message || "Server Error" });
-});
+// Fail fast if required settings are missing, instead of failing on first login
+for (const key of [
+  "MONGO_URI",
+  "ACCESS_TOKEN_SECRET",
+  "REFRESH_TOKEN_SECRET",
+]) {
+  if (!process.env[key]) {
+    console.error(`Missing required environment variable: ${key}`);
+    process.exit(1);
+  }
+}
 
 mongoose
   .connect(process.env.MONGO_URI)
-  .then(() =>
-    app.listen(process.env.PORT, () =>
-      console.log(`Server running on port ${process.env.PORT}`),
-    ),
-  )
-  .catch((err) => console.error(err));
+  .then(() => {
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  })
+  .catch((err) => {
+    console.error("Could not connect to MongoDB:", err);
+    process.exit(1); // Non-zero exit so Render/nodemon show it as a crash
+  });

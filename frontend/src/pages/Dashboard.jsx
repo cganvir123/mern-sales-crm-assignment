@@ -231,22 +231,37 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchStats = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await api.get("/dashboard/stats");
-      setStats(response.data);
-    } catch (err) {
-      setError(err.response?.data?.message || "Could not load dashboard data.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Bumping this number re-runs the fetch (used by the "Try again" button)
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let ignore = false;
+
+    const fetchStats = async () => {
+      try {
+        const response = await api.get("/dashboard/stats");
+        if (!ignore) setStats(response.data);
+      } catch (err) {
+        if (!ignore)
+          setError(
+            err.response?.data?.message || "Could not load dashboard data.",
+          );
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+
     fetchStats();
-  }, []);
+    return () => {
+      ignore = true;
+    };
+  }, [reloadKey]);
+
+  const retryFetch = () => {
+    setIsLoading(true);
+    setError(null);
+    setReloadKey((key) => key + 1);
+  };
 
   // Personal greeting for the header
   const hour = new Date().getHours();
@@ -357,7 +372,7 @@ const Dashboard = () => {
             <span>{error}</span>
             <button
               className="btn btn-sm btn-outline-danger"
-              onClick={fetchStats}
+              onClick={retryFetch}
             >
               Try again
             </button>

@@ -1,18 +1,14 @@
 const Activity = require("../models/Activity");
 const Lead = require("../models/Lead");
+const { leadScope } = require("../utils/leadAccess");
 
-// Log an Activity (Calls, Meetings, Notes, Follow-ups)[cite: 2]
+// Log an Activity (Calls, Meetings, Notes, Follow-ups)
 const createActivity = async (req, res, next) => {
   try {
     const { type, notes, leadId } = req.body;
 
     // Verify lead ownership
-    let leadQuery = { _id: leadId };
-    if (req.user.role === "Sales User") {
-      leadQuery.assignedTo = req.user.id;
-    }
-
-    const lead = await Lead.findOne(leadQuery);
+    const lead = await Lead.findOne(leadScope(req.user, { _id: leadId }));
     if (!lead) {
       return res
         .status(403)
@@ -26,18 +22,13 @@ const createActivity = async (req, res, next) => {
   }
 };
 
-// Get Activities for a specific Lead (Used on the Lead Details Page)[cite: 2]
+// Get Activities for a specific Lead (Lead Details page)
 const getActivitiesByLead = async (req, res, next) => {
   try {
     const { leadId } = req.params;
 
     // Verify ownership before showing data
-    let leadQuery = { _id: leadId };
-    if (req.user.role === "Sales User") {
-      leadQuery.assignedTo = req.user.id;
-    }
-
-    const lead = await Lead.findOne(leadQuery);
+    const lead = await Lead.findOne(leadScope(req.user, { _id: leadId }));
     if (!lead) {
       return res
         .status(403)

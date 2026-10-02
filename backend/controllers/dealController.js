@@ -1,18 +1,18 @@
 const Deal = require("../models/Deal");
 const Lead = require("../models/Lead");
+const {
+  leadScope,
+  canAccessLead,
+  ownedLeadIds,
+} = require("../utils/leadAccess");
 
-// Create Deal[cite: 2]
+// Create Deal
 const createDeal = async (req, res, next) => {
   try {
     const { title, amount, stage, leadId } = req.body;
 
-    // Security check: Verify the lead exists and belongs to the user (if Sales User)
-    let leadQuery = { _id: leadId };
-    if (req.user.role === "Sales User") {
-      leadQuery.assignedTo = req.user.id;
-    }
-
-    const lead = await Lead.findOne(leadQuery);
+    // Verify the lead exists and belongs to the user (if Sales User)
+    const lead = await Lead.findOne(leadScope(req.user, { _id: leadId }));
     if (!lead) {
       return res
         .status(403)
@@ -26,21 +26,18 @@ const createDeal = async (req, res, next) => {
   }
 };
 
-// Update Deal Stage (Prospect, Negotiation, Won, Lost)[cite: 2]
+// Update Deal Stage (Prospect, Negotiation, Won, Lost)
 const updateDealStage = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { stage } = req.body; // Only updating the stage
+    const { stage } = req.body; // Validated in the route
 
-    // We use populate to verify the nested lead ownership in one database trip
     const deal = await Deal.findById(id).populate("leadId");
-
     if (!deal) return res.status(404).json({ message: "Deal not found" });
 
-    if (
-      req.user.role === "Sales User" &&
-      deal.leadId.assignedTo.toString() !== req.user.id
-    ) {
+    // canAccessLead also covers deals whose lead no longer exists
+    // (previously that crashed on deal.leadId.assignedTo)
+    if (!canAccessLead(req.user, deal.leadId)) {
       return res
         .status(403)
         .json({ message: "Unauthorized to update this deal" });
@@ -49,31 +46,39 @@ const updateDealStage = async (req, res, next) => {
     deal.stage = stage;
     await deal.save();
 
+    // Only return the lead fields the UI needs
+    await deal.populate("leadId", "name email");
     res.status(200).json(deal);
   } catch (error) {
     next(error);
   }
 };
 
-// View Deals by Stage[cite: 2]
-const getDealsByStage = async (req, res, next) => {
+// View Deals, optionally filtered: /api/deals?stage=Won  or  ?leadId=<id>
+const getDeals = async (req, res, next) => {
   try {
-    const { stage } = req.query; // e.g., /api/deals?stage=Won
-    let query = {};
+    const { stage, leadId } = req.query;
+    const query = {};
 
     if (stage) query.stage = stage;
 
-    // If Sales User, we need to find deals belonging to their leads.
-    // This requires a slightly complex query using $in
-    if (req.user.role === "Sales User") {
-      const userLeads = await Lead.find({ assignedTo: req.user.id }).select(
-        "_id",
-      );
-      const leadIds = userLeads.map((lead) => lead._id);
-      query.leadId = { $in: leadIds };
+    if (leadId) {
+      // Single-lead view (Lead Details page): check access to that one lead
+      const lead = await Lead.findOne(leadScope(req.user, { _id: leadId }));
+      if (!lead) {
+        return res
+          .status(404)
+          .json({ message: "Lead not found or unauthorized" });
+      }
+      query.leadId = leadId;
+    } else if (req.user.role === "Sales User") {
+      // Pipeline view: only deals on the Sales User's own leads
+      query.leadId = { $in: await ownedLeadIds(req.user) };
     }
 
-    const deals = await Deal.find(query).populate("leadId", "name email");
+    const deals = await Deal.find(query)
+      .populate("leadId", "name email")
+      .sort({ createdAt: -1 });
     res.status(200).json(deals);
   } catch (error) {
     next(error);
@@ -87,20 +92,24 @@ const deleteDeal = async (req, res, next) => {
 
     if (!deal) return res.status(404).json({ message: "Deal not found" });
 
-    if (
-      req.user.role === "Sales User" &&
-      deal.leadId.assignedTo.toString() !== req.user.id
-    ) {
+    if (!canAccessLead(req.user, deal.leadId)) {
       return res
         .status(403)
         .json({ message: "Unauthorized to delete this deal" });
     }
 
-    await Deal.findByIdAndDelete(id);
+    await deal.deleteOne();
     res.status(200).json({ message: "Deal deleted successfully" });
   } catch (error) {
     next(error);
   }
 };
 
-module.exports = { createDeal, updateDealStage, getDealsByStage, deleteDeal };
+// getDealsByStage is kept as an alias so older imports keep working
+module.exports = {
+  createDeal,
+  updateDealStage,
+  getDeals,
+  getDealsByStage: getDeals,
+  deleteDeal,
+};

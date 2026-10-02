@@ -1,75 +1,72 @@
 import axios from "axios";
 
-// ----------------------------------------------------
-// TOGGLE THESE DEPENDING ON YOUR ENVIRONMENT
-// ----------------------------------------------------
-
-// 1. Local Development URL:
-const BASE_URL = "http://localhost:5000/api";
-
-// 2. Live Production URL (Render):
-// const BASE_URL = "https://mern-sales-crm-assignment.onrender.com/api";
-
-// ----------------------------------------------------
+// .env.local -> VITE_API_URL=http://localhost:5000/api
+// Vercel     -> VITE_API_URL=https://mern-sales-crm-assignment.onrender.com/api
+const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const api = axios.create({
   baseURL: BASE_URL,
-  withCredentials: true, // CRUCIAL for sending the HTTP-only cookies
+  withCredentials: true, // Sends the HTTP-only auth cookies
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Response Interceptor
+// Pulls the most useful message out of any API error. The backend now always
+// sends { message }, validation errors included.
+export const getErrorMessage = (error, fallback = "Something went wrong") =>
+  error?.response?.data?.message ||
+  error?.response?.data?.errors?.[0]?.msg ||
+  fallback;
+
+// These must never trigger the refresh-and-retry logic.
+// (/auth/me is NOT in this list: an expired access token there should refresh.)
+const NO_REFRESH_ROUTES = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/refresh",
+  "/auth/logout",
+];
+
+// If several requests fail with 401 at once, they all wait on ONE refresh call
+let refreshPromise = null;
+
+const refreshSession = () => {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(`${BASE_URL}/auth/refresh`, {}, { withCredentials: true })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+};
+
 api.interceptors.response.use(
-  (response) => {
-    // If the request succeeds, just return the response normally
-    return response;
-  },
+  (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const skipRefresh = NO_REFRESH_ROUTES.some((route) =>
+      originalRequest?.url?.startsWith(route),
+    );
 
-    // NEW: Don't run refresh logic for the auth endpoints themselves.
-    // A 401 from /auth/login means "wrong email or password", not "token expired",
-    // so the error must go straight back to the Login page to be displayed.
-    const isAuthRoute = originalRequest?.url?.startsWith("/auth/");
-
-    // If the error is 401 (Unauthorized) and we haven't already retried this request
     if (
-      error.response &&
-      error.response.status === 401 &&
+      error.response?.status === 401 &&
+      originalRequest &&
       !originalRequest._retry &&
-      !isAuthRoute // <-- NEW
+      !skipRefresh
     ) {
-      // Set a flag so we don't get stuck in an infinite loop if the refresh also fails
-      originalRequest._retry = true;
+      originalRequest._retry = true; // Don't loop if the retry also fails
 
       try {
-        // Use plain 'axios' here to completely bypass the interceptor
-        await axios.post(
-          `${BASE_URL}/auth/refresh`,
-          {},
-          { withCredentials: true },
-        );
-
-        // If successful, retry the exact same original request that failed
+        await refreshSession();
         return api(originalRequest);
       } catch (refreshError) {
-        // If refresh fails, explicitly destroy cookies and redirect to login
-        try {
-          await axios.post(
-            `${BASE_URL}/auth/logout`,
-            {},
-            { withCredentials: true },
-          );
-        } catch (logoutError) {
-          console.error("Logout failed", logoutError);
+        // The session check on app start handles "not logged in" itself;
+        // redirecting here would reload /login forever.
+        if (!originalRequest.skipAuthRedirect) {
+          window.location.href = "/login";
         }
-
-        // Clear local storage and redirect
-        localStorage.removeItem("crm_user");
-        window.location.href = "/login";
-
         return Promise.reject(refreshError);
       }
     }

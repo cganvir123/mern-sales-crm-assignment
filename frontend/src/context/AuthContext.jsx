@@ -1,30 +1,40 @@
-import { createContext, useState, useEffect } from "react";
+import { createContext, useEffect, useState } from "react";
+import api from "../services/api";
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  // 1. Initialize state directly from localStorage so it survives page reloads
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("crm_user");
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
+  // The server (cookies) is the source of truth, so we ask it who is logged
+  // in when the app starts instead of trusting localStorage.
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // We can set loading to false immediately since we are reading sync from localStorage
-  const [loading, setLoading] = useState(false);
-
-  // 2. Login function: Saves the non-sensitive profile data
-  const loginContext = (userData) => {
-    setUser(userData);
-    localStorage.setItem("crm_user", JSON.stringify(userData));
-  };
-
-  // 3. Logout function: Clears the profile data
-  const logoutContext = () => {
-    setUser(null);
+  useEffect(() => {
+    // Leftover from the old version that stored the user in localStorage
     localStorage.removeItem("crm_user");
-    // Note: You will also make an API call to a /logout backend route
-    // later to clear the httpOnly cookies.
-  };
+
+    let ignore = false;
+
+    api
+      .get("/auth/me", { skipAuthRedirect: true })
+      .then((response) => {
+        if (!ignore) setUser(response.data.user);
+      })
+      .catch(() => {
+        if (!ignore) setUser(null); // Not logged in / session expired
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const loginContext = (userData) => setUser(userData);
+  const logoutContext = () => setUser(null);
 
   return (
     <AuthContext.Provider

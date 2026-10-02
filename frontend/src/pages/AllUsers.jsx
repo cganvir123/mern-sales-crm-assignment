@@ -16,19 +16,25 @@ const AllUsers = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchSalesUsers();
-  }, []);
+    // Ignore the response if the page unmounts before it arrives
+    let ignore = false;
 
-  const fetchSalesUsers = async () => {
-    try {
-      const response = await api.get("/users/sales-users");
-      setSalesUsers(response.data);
-    } catch (error) {
-      console.error("Error fetching users:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const fetchSalesUsers = async () => {
+      try {
+        const response = await api.get("/users/sales-users");
+        if (!ignore) setSalesUsers(response.data);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+      } finally {
+        if (!ignore) setIsLoading(false);
+      }
+    };
+
+    fetchSalesUsers();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   // Summary numbers for the header strip
   const totalLeads = salesUsers.reduce(

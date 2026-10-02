@@ -2,8 +2,8 @@ const mongoose = require("mongoose");
 
 const dealSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true },
-    amount: { type: Number, required: true },
+    title: { type: String, required: true, trim: true },
+    amount: { type: Number, required: true, min: 0 },
     stage: {
       type: String,
       enum: ["Prospect", "Negotiation", "Won", "Lost"], // Required deal stages
@@ -17,5 +17,7 @@ const dealSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+dealSchema.index({ leadId: 1 });
 
 module.exports = mongoose.model("Deal", dealSchema);
