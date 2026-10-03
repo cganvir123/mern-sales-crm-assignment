@@ -22,7 +22,7 @@ const run = async () => {
       // Bumping tokenVersion logs them out everywhere, so their next
       // login gets a token with the new role
       { role: "Admin", $inc: { tokenVersion: 1 } },
-      { new: true },
+      { returnDocument: "after" },
     );
 
     if (!user) {

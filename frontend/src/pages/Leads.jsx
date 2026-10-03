@@ -10,6 +10,7 @@ const STATUS_TABS = [
   { value: "New", label: "New" },
   { value: "Contacted", label: "Contacted" },
   { value: "Qualified", label: "Qualified" },
+  { value: "Lost", label: "Lost" },
 ];
 
 // Soft badge class per status
@@ -17,6 +18,7 @@ const STATUS_CLASS = {
   New: "leads-status-new",
   Contacted: "leads-status-contacted",
   Qualified: "leads-status-qualified",
+  Lost: "leads-status-lost",
 };
 
 const Leads = () => {
@@ -178,9 +180,9 @@ const Leads = () => {
                           ? "Try a different name or status filter."
                           : user?.role === "Sales User"
                             ? "Add your first lead to start tracking it."
-                            : "Leads will appear here once sales users add them."}
+                            : "Add a lead and assign it to a sales user."}
                       </div>
-                      {!isFiltering && user?.role === "Sales User" && (
+                      {!isFiltering && (
                         <Link
                           to="/leads/new"
                           className="btn btn-primary btn-sm mt-3"
@@ -198,12 +200,29 @@ const Leads = () => {
                           <span className="leads-avatar" aria-hidden="true">
                             {lead.name?.charAt(0).toUpperCase()}
                           </span>
-                          <Link
-                            to={`/leads/${lead._id}`}
-                            className="leads-name"
-                          >
-                            {lead.name}
-                          </Link>
+                          <div>
+                            <div className="d-flex align-items-center flex-wrap gap-2">
+                              <Link
+                                to={`/leads/${lead._id}`}
+                                className="leads-name"
+                              >
+                                {lead.name}
+                              </Link>
+                              {lead.overdueTasks > 0 && (
+                                <span
+                                  className="leads-overdue"
+                                  title="Follow-ups past their due date"
+                                >
+                                  {lead.overdueTasks} overdue
+                                </span>
+                              )}
+                            </div>
+                            {lead.company && (
+                              <div className="leads-company">
+                                {lead.company}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="leads-email">{lead.email}</td>
@@ -497,6 +516,28 @@ const styles = `
 .leads-status-qualified {
   background: #dcf1e5;
   color: #146c43;
+}
+
+.leads-status-lost {
+  background: #fbe1e3;
+  color: #b02a37;
+}
+
+.leads-company {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.leads-overdue {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fbe1e3;
+  color: #b02a37;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .leads-view-btn {

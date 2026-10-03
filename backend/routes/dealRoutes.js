@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
   createDeal,
-  updateDealStage,
+  updateDeal,
   getDeals,
   deleteDeal,
 } = require("../controllers/dealController");
@@ -10,7 +10,7 @@ const { protect } = require("../middleware/authMiddleware");
 const {
   validateIdParam,
   validateDeal,
-  validateDealStage,
+  validateDealUpdate,
   validateDealQuery,
 } = require("../middleware/validationMiddleware");
 
@@ -23,7 +23,7 @@ router
 
 router
   .route("/:id")
-  .patch(validateDealStage, updateDealStage) // Validates id + stage enum
+  .patch(validateDealUpdate, updateDeal) // title, amount, stage, close date
   .delete(validateIdParam(), deleteDeal);
 
 module.exports = router;

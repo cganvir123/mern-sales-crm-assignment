@@ -13,13 +13,19 @@ const User = require("../models/User");
 let mongo;
 
 beforeAll(async () => {
-  mongo = await MongoMemoryServer.create();
-  await mongoose.connect(mongo.getUri());
+  // TEST_MONGO_URI lets you point the tests at a throwaway local database
+  // instead of downloading MongoDB (never use your real database here!)
+  if (process.env.TEST_MONGO_URI) {
+    await mongoose.connect(process.env.TEST_MONGO_URI);
+  } else {
+    mongo = await MongoMemoryServer.create();
+    await mongoose.connect(mongo.getUri());
+  }
 });
 
 afterAll(async () => {
   await mongoose.disconnect();
-  await mongo.stop();
+  if (mongo) await mongo.stop();
 });
 
 beforeEach(async () => {
@@ -113,4 +119,167 @@ test("logout revokes the refresh token", async () => {
     .post("/api/auth/refresh")
     .set("Cookie", stolenCookie.split(";")[0])
     .expect(401);
+});
+
+// ---------------------------------------------------------------------------
+// Features: follow-up tasks, activity edit/delete, deal edit, lead details
+// ---------------------------------------------------------------------------
+
+const HOUR = 60 * 60 * 1000;
+
+// Logs in Alice and gives her one lead
+const aliceWithLead = async () => {
+  const alice = await loginAs("Alice", "alice@example.com");
+  const lead = await alice
+    .post("/api/leads")
+    .send({ name: "Acme", email: "acme@example.com" })
+    .expect(201);
+  return { alice, leadId: lead.body._id };
+};
+
+test("follow-ups need a due date and record who logged them", async () => {
+  const { alice, leadId } = await aliceWithLead();
+
+  await alice
+    .post("/api/activities")
+    .send({ type: "Follow-ups", notes: "Call back", leadId })
+    .expect(400);
+
+  const res = await alice
+    .post("/api/activities")
+    .send({
+      type: "Follow-ups",
+      notes: "Call back",
+      leadId,
+      dueDate: new Date(Date.now() + HOUR).toISOString(),
+    })
+    .expect(201);
+  expect(res.body.createdBy.name).toBe("Alice");
+  expect(res.body.completed).toBe(false);
+});
+
+test("overdue follow-ups show on the lead list and the task list", async () => {
+  const { alice, leadId } = await aliceWithLead();
+
+  const task = await alice
+    .post("/api/activities")
+    .send({
+      type: "Follow-ups",
+      notes: "Send proposal",
+      leadId,
+      dueDate: new Date(Date.now() - HOUR).toISOString(), // already overdue
+    })
+    .expect(201);
+
+  let list = await alice.get("/api/leads").expect(200);
+  expect(list.body.leads[0].overdueTasks).toBe(1);
+
+  const tasks = await alice.get("/api/activities/tasks").expect(200);
+  expect(tasks.body).toHaveLength(1);
+  expect(tasks.body[0].leadId.name).toBe("Acme");
+
+  // Mark it done: it disappears from both
+  const done = await alice
+    .patch(`/api/activities/${task.body._id}`)
+    .send({ completed: true })
+    .expect(200);
+  expect(done.body.completed).toBe(true);
+  expect(done.body.completedAt).toBeTruthy();
+
+  list = await alice.get("/api/leads").expect(200);
+  expect(list.body.leads[0].overdueTasks).toBe(0);
+  const after = await alice.get("/api/activities/tasks").expect(200);
+  expect(after.body).toHaveLength(0);
+});
+
+test("activities can be edited and deleted only by the lead's owner", async () => {
+  const { alice, leadId } = await aliceWithLead();
+  const bob = await loginAs("Bob", "bob@example.com");
+
+  const activity = await alice
+    .post("/api/activities")
+    .send({ type: "Notes", notes: "Typo hre", leadId })
+    .expect(201);
+  const url = `/api/activities/${activity.body._id}`;
+
+  await bob.patch(url).send({ notes: "Hacked" }).expect(404);
+  await bob.delete(url).expect(404);
+
+  const edited = await alice
+    .patch(url)
+    .send({ notes: "Typo here" })
+    .expect(200);
+  expect(edited.body.notes).toBe("Typo here");
+
+  // Changing a note into a follow-up requires a due date
+  await alice.patch(url).send({ type: "Follow-ups" }).expect(400);
+
+  await alice.delete(url).expect(200);
+  const remaining = await alice
+    .get(`/api/activities/lead/${leadId}`)
+    .expect(200);
+  expect(remaining.body).toHaveLength(0);
+});
+
+test("deals can be fully edited and the close date cleared", async () => {
+  const { alice, leadId } = await aliceWithLead();
+
+  const deal = await alice
+    .post("/api/deals")
+    .send({
+      title: "Website",
+      amount: 1000,
+      leadId,
+      expectedCloseDate: "2026-12-31",
+    })
+    .expect(201);
+  expect(deal.body.expectedCloseDate).toContain("2026-12-31");
+
+  const url = `/api/deals/${deal.body._id}`;
+  const edited = await alice
+    .patch(url)
+    .send({ title: "Website v2", amount: 2500, stage: "Negotiation" })
+    .expect(200);
+  expect(edited.body).toMatchObject({
+    title: "Website v2",
+    amount: 2500,
+    stage: "Negotiation",
+  });
+
+  const cleared = await alice
+    .patch(url)
+    .send({ expectedCloseDate: null })
+    .expect(200);
+  expect(cleared.body.expectedCloseDate).toBeUndefined();
+
+  await alice.patch(url).send({ amount: -5 }).expect(400);
+});
+
+test("leads store company, source and notes, and can be marked Lost", async () => {
+  const alice = await loginAs("Alice", "alice@example.com");
+
+  const lead = await alice
+    .post("/api/leads")
+    .send({
+      name: "Acme",
+      email: "acme@example.com",
+      company: "Acme Pvt Ltd",
+      source: "Referral",
+      notes: "Met at a conference",
+    })
+    .expect(201);
+  expect(lead.body).toMatchObject({
+    company: "Acme Pvt Ltd",
+    source: "Referral",
+  });
+
+  const url = `/api/leads/${lead.body._id}`;
+  await alice.patch(url).send({ source: "Carrier pigeon" }).expect(400);
+
+  const lost = await alice
+    .patch(url)
+    .send({ status: "Lost", source: "" }) // "" clears the source
+    .expect(200);
+  expect(lost.body.status).toBe("Lost");
+  expect(lost.body.source).toBeUndefined();
 });

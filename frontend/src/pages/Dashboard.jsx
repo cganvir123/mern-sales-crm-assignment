@@ -14,15 +14,22 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import api from "../services/api";
+import api, { getErrorMessage } from "../services/api";
 import Navbar from "../components/Navbar";
 import { AuthContext } from "../context/AuthContext";
+import {
+  formatMoney,
+  formatMoneyCompact,
+  formatDateTime,
+  getDueState,
+} from "../utils/format";
 
 // Same colors as the badges used elsewhere in the app
 const STATUS_COLORS = {
   New: "#0dcaf0",
   Contacted: "#ffc107",
   Qualified: "#198754",
+  Lost: "#dc3545",
 };
 const STAGE_COLORS = {
   Prospect: "#6c757d",
@@ -40,6 +47,7 @@ const STATUS_BADGE = {
   New: "bg-info",
   Contacted: "bg-warning",
   Qualified: "bg-success",
+  Lost: "bg-danger",
 };
 const ACTIVITY_LABEL = {
   Calls: "Call",
@@ -47,18 +55,6 @@ const ACTIVITY_LABEL = {
   Notes: "Note",
   "Follow-ups": "Follow-up",
 };
-
-const currency = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-const compactCurrency = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
 
 const timeAgo = (date) => {
   const seconds = Math.floor((Date.now() - new Date(date)) / 1000);
@@ -221,6 +217,85 @@ const DonutChart = ({ data, colors, centerLabel, emptyText }) => {
   );
 };
 
+// ---------- Follow-ups card ----------
+
+const DUE_TEXT = {
+  overdue: "Overdue",
+  today: "Today",
+  upcoming: "Upcoming",
+};
+
+const FollowUpsCard = ({ tasks, error, isAdmin, onComplete }) => {
+  const counts = { overdue: 0, today: 0, upcoming: 0 };
+  tasks.forEach((task) => {
+    counts[getDueState(task)] += 1;
+  });
+
+  return (
+    <ChartCard
+      title={isAdmin ? "Team follow-ups" : "Your follow-ups"}
+      subtitle="Overdue and due in the next 7 days"
+      accent="#fd7e14"
+      action={
+        <div className="dash-task-counts">
+          {counts.overdue > 0 && (
+            <span className="dash-due dash-due-overdue">
+              {counts.overdue} overdue
+            </span>
+          )}
+          {counts.today > 0 && (
+            <span className="dash-due dash-due-today">
+              {counts.today} today
+            </span>
+          )}
+        </div>
+      }
+    >
+      {error ? (
+        <div className="dash-empty">{error}</div>
+      ) : tasks.length === 0 ? (
+        <div className="dash-empty dash-empty-sm">
+          Nothing due. Schedule follow-ups from a lead's page.
+        </div>
+      ) : (
+        <ul className="dash-tasks">
+          {tasks.map((task) => {
+            const state = getDueState(task);
+            return (
+              <li key={task._id}>
+                {/* Only the lead's owner can tick it off */}
+                {!isAdmin && (
+                  <button
+                    type="button"
+                    className="dash-task-check"
+                    onClick={() => onComplete(task)}
+                    aria-label={`Mark "${task.notes}" as done`}
+                    title="Mark as done"
+                  />
+                )}
+                <div className="dash-task-body">
+                  <div className="dash-task-notes">{task.notes}</div>
+                  <div className="dash-task-meta">
+                    <Link to={`/leads/${task.leadId._id}`}>
+                      {task.leadId.name}
+                    </Link>
+                    {isAdmin && task.createdBy?.name && (
+                      <span> · {task.createdBy.name}</span>
+                    )}
+                  </div>
+                </div>
+                <span className={`dash-due dash-due-${state}`}>
+                  {DUE_TEXT[state]} · {formatDateTime(task.dueDate)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </ChartCard>
+  );
+};
+
 // ---------- Page ----------
 
 const Dashboard = () => {
@@ -256,6 +331,41 @@ const Dashboard = () => {
       ignore = true;
     };
   }, [reloadKey]);
+
+  // Follow-up tasks load separately, so a failure here doesn't hide the charts
+  const [tasks, setTasks] = useState([]);
+  const [tasksError, setTasksError] = useState(null);
+
+  useEffect(() => {
+    let ignore = false;
+    api
+      .get("/activities/tasks")
+      .then((res) => {
+        if (!ignore) setTasks(res.data);
+      })
+      .catch((err) => {
+        if (!ignore)
+          setTasksError(getErrorMessage(err, "Could not load follow-ups."));
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [reloadKey]);
+
+  const completeTask = async (task) => {
+    // Remove it right away; put it back if the request fails
+    setTasks((current) => current.filter((t) => t._id !== task._id));
+    try {
+      await api.patch(`/activities/${task._id}`, { completed: true });
+    } catch (err) {
+      setTasks((current) =>
+        [...current, task].sort(
+          (a, b) => new Date(a.dueDate) - new Date(b.dueDate),
+        ),
+      );
+      setTasksError(getErrorMessage(err, "Could not update the follow-up."));
+    }
+  };
 
   const retryFetch = () => {
     setIsLoading(true);
@@ -295,14 +405,12 @@ const Dashboard = () => {
               <Link to="/leads" className="btn dash-btn-ghost">
                 View leads
               </Link>
-              {!isAdmin && (
-                <Link
-                  to="/leads/new"
-                  className="btn btn-primary dash-btn-primary"
-                >
-                  + Add New Lead
-                </Link>
-              )}
+              <Link
+                to="/leads/new"
+                className="btn btn-primary dash-btn-primary"
+              >
+                + Add New Lead
+              </Link>
             </div>
           </div>
 
@@ -320,7 +428,7 @@ const Dashboard = () => {
               <div className="col-12 col-sm-6 col-xl-3">
                 <KpiCard
                   label="Open pipeline"
-                  value={currency.format(stats.totals.pipelineValue)}
+                  value={formatMoney(stats.totals.pipelineValue)}
                   detail={`${stats.totals.openDeals} open deals`}
                   color="#ffc107"
                   icon={ICONS.pipeline}
@@ -329,7 +437,7 @@ const Dashboard = () => {
               <div className="col-12 col-sm-6 col-xl-3">
                 <KpiCard
                   label="Revenue won"
-                  value={currency.format(stats.totals.wonValue)}
+                  value={formatMoney(stats.totals.wonValue)}
                   detail={`${stats.totals.wonDeals} deals won`}
                   color="#20c997"
                   icon={ICONS.won}
@@ -381,6 +489,18 @@ const Dashboard = () => {
 
         {showData && (
           <>
+            {/* Follow-up tasks: overdue first */}
+            <div className="row g-4 mb-4">
+              <div className="col-12">
+                <FollowUpsCard
+                  tasks={tasks}
+                  error={tasksError}
+                  isAdmin={isAdmin}
+                  onComplete={completeTask}
+                />
+              </div>
+            </div>
+
             {/* Leads over time + lead status */}
             <div className="row g-4 mb-4">
               <div className="col-12 col-lg-8">
@@ -500,7 +620,7 @@ const Dashboard = () => {
                           tick={{ fill: "#64748b", fontSize: 12 }}
                         />
                         <YAxis
-                          tickFormatter={(v) => compactCurrency.format(v)}
+                          tickFormatter={(v) => formatMoneyCompact(v)}
                           tickLine={false}
                           axisLine={false}
                           tick={{ fill: "#64748b", fontSize: 12 }}
@@ -509,7 +629,7 @@ const Dashboard = () => {
                           {...TOOLTIP_STYLE}
                           cursor={{ fill: "rgba(20, 33, 61, 0.04)" }}
                           formatter={(value, name, item) => [
-                            `${currency.format(value)} (${item.payload.count} deals)`,
+                            `${formatMoney(value)} (${item.payload.count} deals)`,
                             "Value",
                           ]}
                         />
@@ -1021,6 +1141,107 @@ const styles = `
   border: 1px dashed #d6dce6;
   border-radius: 10px;
   padding: 16px;
+}
+
+.dash-empty-sm {
+  min-height: 90px;
+}
+
+/* Follow-up tasks */
+.dash-task-counts {
+  display: flex;
+  gap: 6px;
+}
+
+.dash-due {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dash-due-overdue { background: #fbe1e3; color: #b02a37; }
+.dash-due-today { background: #fff3cd; color: #8a6100; }
+.dash-due-upcoming { background: #eef1f6; color: #475569; }
+
+.dash-tasks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.dash-tasks li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.dash-tasks li:last-child {
+  border-bottom: none;
+}
+
+.dash-task-check {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 2px solid #b3bfd0;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dash-task-check:hover {
+  border-color: #198754;
+  background: #dcf1e5;
+}
+
+.dash-task-check:focus-visible {
+  outline: 2px solid #0d6efd;
+  outline-offset: 2px;
+}
+
+.dash-task-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-task-notes {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-task-meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.dash-task-meta a {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dash-task-meta a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 575px) {
+  .dash-tasks li {
+    flex-wrap: wrap;
+  }
+  .dash-tasks .dash-due {
+    margin-left: 36px;
+  }
 }
 
 /* Recent leads table */

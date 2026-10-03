@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import api, { getErrorMessage } from "../services/api";
 import Navbar from "../components/Navbar";
 import { AuthContext } from "../context/AuthContext";
+import { LEAD_SOURCES } from "../utils/constants";
 
 // Status options with the same colors used across the app
 const STATUS_OPTIONS = [
@@ -21,6 +22,9 @@ const CreateLead = () => {
     name: "",
     email: "",
     phone: "",
+    company: "",
+    source: "",
+    notes: "",
     status: "New",
     assignedTo: "",
   });
@@ -128,17 +132,32 @@ const CreateLead = () => {
 
           <form onSubmit={handleSubmit}>
             <div className="cl-field">
-              <label htmlFor="cl-name">Company / client name</label>
+              <label htmlFor="cl-name">Lead name</label>
               <input
                 id="cl-name"
                 type="text"
                 className="cl-input"
-                placeholder="e.g. Acme Technologies Pvt. Ltd."
+                placeholder="e.g. Priya Sharma or Acme Technologies"
                 value={formData.name}
                 onChange={(e) =>
                   setFormData({ ...formData, name: e.target.value })
                 }
                 required
+              />
+            </div>
+
+            <div className="cl-field">
+              <label htmlFor="cl-company">Company (optional)</label>
+              <input
+                id="cl-company"
+                type="text"
+                className="cl-input"
+                placeholder="e.g. Acme Technologies"
+                maxLength={150}
+                value={formData.company}
+                onChange={(e) =>
+                  setFormData({ ...formData, company: e.target.value })
+                }
               />
             </div>
 
@@ -170,6 +189,25 @@ const CreateLead = () => {
                   setFormData({ ...formData, phone: e.target.value })
                 }
               />
+            </div>
+
+            <div className="cl-field">
+              <label htmlFor="cl-source">Lead source (optional)</label>
+              <select
+                id="cl-source"
+                className="cl-input"
+                value={formData.source}
+                onChange={(e) =>
+                  setFormData({ ...formData, source: e.target.value })
+                }
+              >
+                <option value="">Where did this lead come from?</option>
+                {LEAD_SOURCES.map((source) => (
+                  <option key={source} value={source}>
+                    {source}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {isAdmin && (
@@ -225,6 +263,21 @@ const CreateLead = () => {
                 })}
               </div>
             </fieldset>
+
+            <div className="cl-field">
+              <label htmlFor="cl-notes">Notes (optional)</label>
+              <textarea
+                id="cl-notes"
+                className="cl-input cl-textarea"
+                rows="3"
+                maxLength={2000}
+                placeholder="Anything worth remembering: budget, decision maker, how you met..."
+                value={formData.notes}
+                onChange={(e) =>
+                  setFormData({ ...formData, notes: e.target.value })
+                }
+              />
+            </div>
 
             <div className="cl-actions">
               <Link to="/leads" className="cl-btn-cancel">
@@ -364,6 +417,13 @@ const styles = `
   border: 1.5px solid var(--border);
   border-radius: 8px;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.cl-textarea {
+  height: auto;
+  padding: 12px 14px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .cl-input::placeholder {

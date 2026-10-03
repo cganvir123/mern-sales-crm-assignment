@@ -3,9 +3,11 @@ const Lead = require("../models/Lead");
 const Deal = require("../models/Deal");
 const Activity = require("../models/Activity");
 
-const LEAD_STATUSES = ["New", "Contacted", "Qualified"];
-const DEAL_STAGES = ["Prospect", "Negotiation", "Won", "Lost"];
-const ACTIVITY_TYPES = ["Calls", "Meetings", "Notes", "Follow-ups"];
+const {
+  LEAD_STATUSES,
+  DEAL_STAGES,
+  ACTIVITY_TYPES,
+} = require("../utils/constants");
 
 // Turns [{ _id: "New", count: 3 }, ...] into { New: { _id: "New", count: 3 }, ... }
 const toMap = (rows) => Object.fromEntries(rows.map((row) => [row._id, row]));

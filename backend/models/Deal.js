@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { DEAL_STAGES } = require("../utils/constants");
 
 const dealSchema = new mongoose.Schema(
   {
@@ -6,9 +7,11 @@ const dealSchema = new mongoose.Schema(
     amount: { type: Number, required: true, min: 0 },
     stage: {
       type: String,
-      enum: ["Prospect", "Negotiation", "Won", "Lost"], // Required deal stages
+      enum: DEAL_STAGES,
       default: "Prospect",
     },
+    // Optional: when the deal is expected to close
+    expectedCloseDate: { type: Date },
     leadId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lead",

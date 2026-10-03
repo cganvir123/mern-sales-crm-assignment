@@ -1,8 +1,17 @@
-const { check, param, query, validationResult } = require("express-validator");
-
-const LEAD_STATUSES = ["New", "Contacted", "Qualified"];
-const DEAL_STAGES = ["Prospect", "Negotiation", "Won", "Lost"];
-const ACTIVITY_TYPES = ["Calls", "Meetings", "Notes", "Follow-ups"];
+const {
+  body,
+  check,
+  param,
+  query,
+  validationResult,
+} = require("express-validator");
+const {
+  LEAD_STATUSES,
+  LEAD_SOURCES,
+  DEAL_STAGES,
+  ACTIVITY_TYPES,
+  FOLLOW_UP,
+} = require("../utils/constants");
 
 // Centralized error responder for validation
 const handleValidationErrors = (req, res, next) => {
@@ -30,6 +39,20 @@ const emailField = (field = "email") =>
     .isEmail()
     .isLength({ max: 254 });
 
+// Optional free-text field. An empty string is allowed: it clears the value.
+const optionalText = (field, label, max) =>
+  check(field, `${label} must be at most ${max} characters`)
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max });
+
+// Optional date. null or "" is allowed: it clears the value.
+const optionalDate = (field, label) =>
+  check(field, `${label} must be a valid date`)
+    .optional({ values: "falsy" })
+    .isISO8601();
+
 // --- Auth Validation Rules ---
 const validateRegister = [
   check("name", "Name is required (max 100 characters)")
@@ -54,6 +77,21 @@ const validateLogin = [
 ];
 
 // --- Lead Validation Rules ---
+const leadDetailFields = [
+  check("phone", "Phone must be at most 30 characters")
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 30 }),
+  optionalText("company", "Company", 150),
+  check("source", "Invalid lead source")
+    .optional()
+    .isIn([...LEAD_SOURCES, ""]), // "" clears it
+  optionalText("notes", "Notes", 2000),
+  check("status", "Invalid status").optional().isIn(LEAD_STATUSES),
+  check("assignedTo", "Invalid assignee").optional().isMongoId(),
+];
+
 // Create: name and email are required
 const validateLead = [
   check("name", "Name is required (max 150 characters)")
@@ -62,13 +100,7 @@ const validateLead = [
     .notEmpty()
     .isLength({ max: 150 }),
   emailField(),
-  check("phone", "Phone must be at most 30 characters")
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 30 }),
-  check("status", "Invalid status").optional().isIn(LEAD_STATUSES),
-  check("assignedTo", "Invalid assignee").optional().isMongoId(),
+  ...leadDetailFields,
   handleValidationErrors,
 ];
 
@@ -81,13 +113,7 @@ const validateLeadUpdate = [
     .notEmpty()
     .isLength({ max: 150 }),
   emailField().optional(),
-  check("phone", "Phone must be at most 30 characters")
-    .optional()
-    .isString()
-    .trim()
-    .isLength({ max: 30 }),
-  check("status", "Invalid status").optional().isIn(LEAD_STATUSES),
-  check("assignedTo", "Invalid assignee").optional().isMongoId(),
+  ...leadDetailFields,
   handleValidationErrors,
 ];
 
@@ -110,13 +136,25 @@ const validateDeal = [
     .isLength({ max: 150 }),
   check("amount", "Amount must be a number of 0 or more").isFloat({ min: 0 }),
   check("stage", "Invalid stage").optional().isIn(DEAL_STAGES),
+  optionalDate("expectedCloseDate", "Expected close date"),
   check("leadId", "Valid Lead ID is required").isMongoId(),
   handleValidationErrors,
 ];
 
-const validateDealStage = [
+// Update: any combination of title, amount, stage and close date
+const validateDealUpdate = [
   param("id", "Invalid deal id").isMongoId(),
-  check("stage", "Invalid stage").isIn(DEAL_STAGES),
+  check("title", "Title cannot be empty (max 150 characters)")
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 150 }),
+  check("amount", "Amount must be a number of 0 or more")
+    .optional()
+    .isFloat({ min: 0 }),
+  check("stage", "Invalid stage").optional().isIn(DEAL_STAGES),
+  optionalDate("expectedCloseDate", "Expected close date"),
   handleValidationErrors,
 ];
 
@@ -137,6 +175,27 @@ const validateActivity = [
     .notEmpty()
     .isLength({ max: 2000 }),
   check("leadId", "Valid Lead ID is required").isMongoId(),
+  // Follow-ups are tasks, so they need a due date
+  check("dueDate", "A valid due date is required for follow-ups")
+    .if(body("type").equals(FOLLOW_UP))
+    .isISO8601(),
+  handleValidationErrors,
+];
+
+const validateActivityUpdate = [
+  param("id", "Invalid activity id").isMongoId(),
+  check("type", "Invalid activity type").optional().isIn(ACTIVITY_TYPES),
+  check("notes", "Notes cannot be empty (max 2000 characters)")
+    .optional()
+    .isString()
+    .trim()
+    .notEmpty()
+    .isLength({ max: 2000 }),
+  check("dueDate", "Due date must be a valid date").optional().isISO8601(),
+  check("completed", "Completed must be true or false")
+    .optional()
+    .isBoolean()
+    .toBoolean(),
   handleValidationErrors,
 ];
 
@@ -148,7 +207,8 @@ module.exports = {
   validateLeadUpdate,
   validateLeadQuery,
   validateDeal,
-  validateDealStage,
+  validateDealUpdate,
   validateDealQuery,
   validateActivity,
+  validateActivityUpdate,
 };

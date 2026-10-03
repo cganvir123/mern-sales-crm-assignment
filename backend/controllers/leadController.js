@@ -4,10 +4,38 @@ const Activity = require("../models/Activity");
 const User = require("../models/User");
 const escapeRegex = require("../utils/escapeRegex");
 const { leadScope } = require("../utils/leadAccess");
+const { FOLLOW_UP } = require("../utils/constants");
 
 // Fields a user is allowed to change on a lead. Anything else in the request
 // body (e.g. _id, createdAt) is ignored instead of being written blindly.
-const EDITABLE_FIELDS = ["name", "email", "phone", "status"];
+const EDITABLE_FIELDS = [
+  "name",
+  "email",
+  "phone",
+  "company",
+  "source",
+  "notes",
+  "status",
+];
+
+// Optional fields: sending "" removes the value from the lead
+const CLEARABLE_FIELDS = ["phone", "company", "source", "notes"];
+
+// { leadId: number of overdue, unfinished follow-ups } for the given leads
+const countOverdueTasks = async (leadIds) => {
+  const rows = await Activity.aggregate([
+    {
+      $match: {
+        leadId: { $in: leadIds },
+        type: FOLLOW_UP,
+        completed: { $ne: true },
+        dueDate: { $lt: new Date() },
+      },
+    },
+    { $group: { _id: "$leadId", count: { $sum: 1 } } },
+  ]);
+  return Object.fromEntries(rows.map((r) => [r._id.toString(), r.count]));
+};
 
 // Confirms an assignee id points at a real Sales User
 const findSalesUser = (id) => User.findOne({ _id: id, role: "Sales User" });
@@ -42,9 +70,16 @@ const getLeads = async (req, res, next) => {
         .populate("assignedTo", "name email")
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limitNumber),
+        .limit(limitNumber)
+        .lean(),
       Lead.countDocuments(query),
     ]);
+
+    // Add the overdue follow-up count, shown as a badge in the list
+    const overdue = await countOverdueTasks(leads.map((lead) => lead._id));
+    for (const lead of leads) {
+      lead.overdueTasks = overdue[lead._id.toString()] || 0;
+    }
 
     res.status(200).json({
       leads,
@@ -61,7 +96,8 @@ const getLeads = async (req, res, next) => {
 
 const createLead = async (req, res, next) => {
   try {
-    const { name, email, phone, status, assignedTo } = req.body;
+    const { name, email, phone, company, source, notes, status, assignedTo } =
+      req.body;
 
     let assigneeId;
     if (req.user.role === "Sales User") {
@@ -70,9 +106,9 @@ const createLead = async (req, res, next) => {
     } else {
       // Admins must pick a valid Sales User (previously this crashed with a 500)
       if (!assignedTo) {
-        return res
-          .status(400)
-          .json({ message: "assignedTo is required when an Admin creates a lead" });
+        return res.status(400).json({
+          message: "assignedTo is required when an Admin creates a lead",
+        });
       }
       const assignee = await findSalesUser(assignedTo);
       if (!assignee) {
@@ -87,6 +123,9 @@ const createLead = async (req, res, next) => {
       name,
       email,
       phone,
+      company,
+      source: source || undefined, // "" means "not set"
+      notes,
       status,
       assignedTo: assigneeId,
     });
@@ -104,9 +143,17 @@ const updateLead = async (req, res, next) => {
     const { id } = req.params;
 
     // Only copy whitelisted fields from the body
+    // Only copy whitelisted fields from the body
     const updates = {};
+    const removals = {};
     for (const field of EDITABLE_FIELDS) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
+      const value = req.body[field];
+      if (value === undefined) continue;
+      if (value === "" && CLEARABLE_FIELDS.includes(field)) {
+        removals[field] = ""; // $unset
+      } else {
+        updates[field] = value;
+      }
     }
 
     // Reassigning a lead is an Admin-only action
@@ -125,15 +172,22 @@ const updateLead = async (req, res, next) => {
       updates.assignedTo = assignee._id;
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (
+      Object.keys(updates).length === 0 &&
+      Object.keys(removals).length === 0
+    ) {
       return res.status(400).json({ message: "No valid fields to update" });
     }
+
+    const changes = {};
+    if (Object.keys(updates).length) changes.$set = updates;
+    if (Object.keys(removals).length) changes.$unset = removals;
 
     // Populate so the UI keeps showing "Assigned to ..." after an update
     const updatedLead = await Lead.findOneAndUpdate(
       leadScope(req.user, { _id: id }),
-      { $set: updates },
-      { new: true, runValidators: true },
+      changes,
+      { returnDocument: "after", runValidators: true },
     ).populate("assignedTo", "name email");
 
     if (!updatedLead) {

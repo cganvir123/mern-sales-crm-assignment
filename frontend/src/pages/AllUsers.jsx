@@ -8,8 +8,10 @@ const STATUS_META = {
   New: { color: "#0dcaf0", tint: "#dff7fc", text: "#087990" },
   Contacted: { color: "#ffc107", tint: "#fff3cd", text: "#8a6100" },
   Qualified: { color: "#198754", tint: "#dcf1e5", text: "#146c43" },
+  Lost: { color: "#dc3545", tint: "#fbe1e3", text: "#b02a37" },
 };
-const STATUSES = ["New", "Contacted", "Qualified"];
+
+const STATUSES = ["New", "Contacted", "Qualified", "Lost"];
 
 const AllUsers = () => {
   const [salesUsers, setSalesUsers] = useState([]);

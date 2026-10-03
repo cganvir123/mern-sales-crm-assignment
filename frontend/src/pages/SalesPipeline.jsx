@@ -1,8 +1,20 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { Link } from "react-router-dom";
-import api from "../services/api";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import api, { getErrorMessage } from "../services/api";
 import Navbar from "../components/Navbar";
-import { formatMoney } from "../utils/format";
+import { AuthContext } from "../context/AuthContext";
+import { formatMoney, formatCloseDate, isCloseDatePast } from "../utils/format";
 
 // Stage colors shared with the Dashboard and Lead Detail pages
 const STAGE_META = {
@@ -11,13 +23,175 @@ const STAGE_META = {
   Won: { color: "#198754", tint: "#dcf1e5", text: "#146c43" },
   Lost: { color: "#dc3545", tint: "#fbe1e3", text: "#b02a37" },
 };
+const STAGES = Object.keys(STAGE_META);
 
 const sumAmounts = (list) =>
   list.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
+// ---------- Deal card ----------
+
+// What a card shows. Used both in the column and in the floating drag preview.
+const DealCardContent = ({ deal }) => {
+  const closePast = isCloseDatePast(deal);
+  return (
+    <>
+      <div className="pl-deal-title">{deal.title}</div>
+      <div className="pl-deal-amount">{formatMoney(deal.amount)}</div>
+
+      {deal.expectedCloseDate && (
+        <div className={`pl-deal-close ${closePast ? "is-past" : ""}`}>
+          {closePast ? "Close date passed · " : "Closes "}
+          {formatCloseDate(deal.expectedCloseDate)}
+        </div>
+      )}
+
+      {deal.leadId?.name && (
+        <div className="pl-deal-lead">
+          <span className="pl-avatar" aria-hidden="true">
+            {deal.leadId.name.charAt(0).toUpperCase()}
+          </span>
+          <span className="pl-deal-lead-name">{deal.leadId.name}</span>
+        </div>
+      )}
+
+      <span className="pl-deal-link">
+        View lead
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </span>
+    </>
+  );
+};
+
+// A card that can be dragged (Sales Users) and clicked to open the lead
+const DraggableDeal = ({ deal, canDrag, blockClickAfterDrag }) => {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: deal._id,
+    disabled: !canDrag,
+  });
+
+  return (
+    <Link
+      ref={setNodeRef}
+      to={`/leads/${deal.leadId?._id || deal.leadId}`}
+      className={`pl-deal ${canDrag ? "is-draggable" : ""} ${
+        isDragging ? "is-dragging" : ""
+      }`}
+      onClick={blockClickAfterDrag}
+      {...listeners}
+      // Keep it announced as a link; only add the drag hints
+      aria-roledescription={canDrag ? "draggable deal" : undefined}
+      aria-describedby={canDrag ? attributes["aria-describedby"] : undefined}
+    >
+      <DealCardContent deal={deal} />
+    </Link>
+  );
+};
+
+// ---------- Stage column ----------
+
+const StageColumn = ({ stage, deals, canDrag, blockClickAfterDrag }) => {
+  const { setNodeRef, isOver } = useDroppable({ id: stage });
+  const meta = STAGE_META[stage];
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`pl-column h-100 ${isOver ? "is-over" : ""}`}
+      style={{ "--stage-color": meta.color, "--stage-tint": meta.tint }}
+    >
+      <div className="pl-column-head">
+        <div className="pl-column-title">
+          <span className="pl-stage-dot" style={{ background: meta.color }} />
+          {stage}
+          <span
+            className="pl-count"
+            style={{ background: meta.tint, color: meta.text }}
+          >
+            {deals.length}
+          </span>
+        </div>
+        <div className="pl-column-total">{formatMoney(sumAmounts(deals))}</div>
+      </div>
+
+      <div className="pl-column-body">
+        {deals.length === 0 ? (
+          <div className="pl-empty">
+            {canDrag ? "Drop a deal here." : "No deals in this stage."}
+          </div>
+        ) : (
+          deals.map((deal) => (
+            <DraggableDeal
+              key={deal._id}
+              deal={deal}
+              canDrag={canDrag}
+              blockClickAfterDrag={blockClickAfterDrag}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ---------- Page ----------
+
 const SalesPipeline = () => {
+  const { user } = useContext(AuthContext);
+  // Same rule as the lead page: only Sales Users change deal stages
+  const canDrag = user?.role === "Sales User";
+
   const [deals, setDeals] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeId, setActiveId] = useState(null); // deal being dragged
+
+  // Toast notification
+  const [toast, setToast] = useState({ message: "", type: "" });
+  const toastTimer = useRef(null);
+  const showToast = (message, type = "success") => {
+    clearTimeout(toastTimer.current);
+    setToast({ message, type });
+    toastTimer.current = setTimeout(
+      () => setToast({ message: "", type: "" }),
+      3000,
+    );
+  };
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  // A drag ends with a mouseup, which can also fire a click on the card.
+  // This flag stops that click from opening the lead.
+  const justDragged = useRef(false);
+  const blockClickAfterDrag = (e) => {
+    if (justDragged.current) e.preventDefault();
+  };
+
+  // Mouse: drag after moving 8px, so a normal click still opens the lead.
+  // Touch: press and hold for 250ms, so swiping still scrolls the page.
+  // Keyboard: focus a card, Space to pick up, arrow keys to move, Space to drop.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      keyboardCodes: {
+        start: ["Space"],
+        cancel: ["Escape"],
+        end: ["Space"],
+      },
+    }),
+  );
 
   useEffect(() => {
     // Ignore the response if the page unmounts before it arrives
@@ -40,13 +214,43 @@ const SalesPipeline = () => {
     };
   }, []);
 
-  // Group deals by the stages mandated in the PDF
-  const groupedDeals = {
-    Prospect: deals.filter((d) => d.stage === "Prospect"),
-    Negotiation: deals.filter((d) => d.stage === "Negotiation"),
-    Won: deals.filter((d) => d.stage === "Won"),
-    Lost: deals.filter((d) => d.stage === "Lost"),
+  const handleDragStart = ({ active }) => setActiveId(active.id);
+
+  const handleDragCancel = () => setActiveId(null);
+
+  const handleDragEnd = async ({ active, over }) => {
+    setActiveId(null);
+    justDragged.current = true;
+    setTimeout(() => {
+      justDragged.current = false;
+    }, 0);
+
+    const deal = deals.find((d) => d._id === active.id);
+    const newStage = over?.id;
+    if (!deal || !newStage || deal.stage === newStage) return;
+
+    const oldStage = deal.stage;
+    const setStage = (stage) =>
+      setDeals((current) =>
+        current.map((d) => (d._id === deal._id ? { ...d, stage } : d)),
+      );
+
+    // Move the card right away, then save. Undo the move if saving fails.
+    setStage(newStage);
+    try {
+      await api.patch(`/deals/${deal._id}`, { stage: newStage });
+      showToast(`"${deal.title}" moved to ${newStage}`);
+    } catch (error) {
+      setStage(oldStage);
+      showToast(getErrorMessage(error, "Could not move the deal"), "danger");
+    }
   };
+
+  // Group deals by stage
+  const groupedDeals = Object.fromEntries(
+    STAGES.map((stage) => [stage, deals.filter((d) => d.stage === stage)]),
+  );
+  const activeDeal = deals.find((d) => d._id === activeId);
 
   if (isLoading) {
     return (
@@ -77,12 +281,30 @@ const SalesPipeline = () => {
       <style>{styles}</style>
       <Navbar />
 
+      {/* Toast */}
+      <div
+        className="pl-toast-wrap"
+        style={{ opacity: toast.message ? 1 : 0 }}
+        role="status"
+        aria-live="polite"
+      >
+        {toast.message && (
+          <div
+            className={`pl-toast ${toast.type === "danger" ? "is-error" : "is-success"}`}
+          >
+            {toast.message}
+          </div>
+        )}
+      </div>
+
       {/* ---------- Navy header band ---------- */}
       <section className="pl-hero">
         <div className="container-fluid px-4">
           <h3 className="pl-hero-title">Sales Pipeline</h3>
           <p className="pl-hero-subtitle">
-            Every deal by stage. Open a deal to update it from its lead's page.
+            {canDrag
+              ? "Drag a deal to another column to change its stage. Click a deal to open its lead."
+              : "Every deal by stage. Click a deal to open its lead."}
           </p>
 
           <div className="pl-summary">
@@ -108,87 +330,43 @@ const SalesPipeline = () => {
 
       {/* ---------- Kanban board ---------- */}
       <div className="container-fluid px-4 pl-main">
-        <div className="row g-4">
-          {/* Render a column for each stage */}
-          {Object.entries(groupedDeals).map(([stage, stageDeals]) => {
-            const meta = STAGE_META[stage];
-            return (
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+          accessibility={{
+            screenReaderInstructions: {
+              draggable:
+                "To move a deal, press Space. Use the arrow keys to move it to another stage, then press Space to drop it or Escape to cancel.",
+            },
+          }}
+        >
+          <div className="row g-4">
+            {STAGES.map((stage) => (
               <div key={stage} className="col-12 col-md-6 col-xl-3">
-                <div
-                  className="pl-column h-100"
-                  style={{ "--stage-color": meta.color }}
-                >
-                  <div className="pl-column-head">
-                    <div className="pl-column-title">
-                      <span
-                        className="pl-stage-dot"
-                        style={{ background: meta.color }}
-                      />
-                      {stage}
-                      <span
-                        className="pl-count"
-                        style={{ background: meta.tint, color: meta.text }}
-                      >
-                        {stageDeals.length}
-                      </span>
-                    </div>
-                    <div className="pl-column-total">
-                      {formatMoney(sumAmounts(stageDeals))}
-                    </div>
-                  </div>
-
-                  <div className="pl-column-body">
-                    {stageDeals.length === 0 ? (
-                      <div className="pl-empty">No deals in this stage.</div>
-                    ) : (
-                      stageDeals.map((deal) => (
-                        <Link
-                          key={deal._id}
-                          to={`/leads/${deal.leadId._id || deal.leadId}`}
-                          className="pl-deal"
-                        >
-                          <div className="pl-deal-title">{deal.title}</div>
-                          <div className="pl-deal-amount">
-                            {formatMoney(deal.amount)}
-                          </div>
-
-                          {/* Safely check if leadId is populated or just an ID */}
-                          {deal.leadId && deal.leadId.name && (
-                            <div className="pl-deal-lead">
-                              <span className="pl-avatar" aria-hidden="true">
-                                {deal.leadId.name.charAt(0).toUpperCase()}
-                              </span>
-                              <span className="pl-deal-lead-name">
-                                {deal.leadId.name}
-                              </span>
-                            </div>
-                          )}
-
-                          <span className="pl-deal-link">
-                            View lead
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <polyline points="9 18 15 12 9 6" />
-                            </svg>
-                          </span>
-                        </Link>
-                      ))
-                    )}
-                  </div>
-                </div>
+                <StageColumn
+                  stage={stage}
+                  deals={groupedDeals[stage]}
+                  canDrag={canDrag}
+                  blockClickAfterDrag={blockClickAfterDrag}
+                />
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+
+          {/* The card that follows the pointer while dragging */}
+          <DragOverlay dropAnimation={null}>
+            {activeDeal ? (
+              <div
+                className="pl-deal is-overlay"
+                style={{ "--stage-color": STAGE_META[activeDeal.stage].color }}
+              >
+                <DealCardContent deal={activeDeal} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </div>
     </div>
   );
@@ -441,6 +619,75 @@ const styles = `
   border-radius: 10px;
   text-align: center;
   padding: 16px;
+}
+
+/* ---------- Drag and drop ---------- */
+.pl-deal.is-draggable {
+  cursor: grab;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+/* The card's original spot while it is being dragged */
+.pl-deal.is-dragging {
+  opacity: 0.35;
+  border-style: dashed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* The floating copy that follows the pointer */
+.pl-deal.is-overlay {
+  cursor: grabbing;
+  box-shadow: 0 16px 40px rgba(20, 33, 61, 0.25);
+  transform: rotate(2deg);
+}
+
+/* Column being hovered with a deal */
+.pl-column.is-over {
+  box-shadow: 0 0 0 3px var(--stage-color), 0 8px 24px rgba(20, 33, 61, 0.08);
+}
+
+.pl-column.is-over .pl-column-body {
+  background: var(--stage-tint);
+}
+
+.pl-deal-close {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.pl-deal-close.is-past {
+  color: #b02a37;
+}
+
+/* Toast */
+.pl-toast-wrap {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1050;
+  transition: opacity 0.3s ease-in-out;
+  pointer-events: none;
+}
+
+.pl-toast {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-family: "Manrope", system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(20, 33, 61, 0.2);
+  border-left: 4px solid #198754;
+  max-width: 380px;
+}
+
+.pl-toast.is-error {
+  border-left-color: #dc3545;
 }
 
 /* ---------- Responsive ---------- */

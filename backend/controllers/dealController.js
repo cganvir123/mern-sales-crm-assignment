@@ -9,7 +9,7 @@ const {
 // Create Deal
 const createDeal = async (req, res, next) => {
   try {
-    const { title, amount, stage, leadId } = req.body;
+    const { title, amount, stage, leadId, expectedCloseDate } = req.body;
 
     // Verify the lead exists and belongs to the user (if Sales User)
     const lead = await Lead.findOne(leadScope(req.user, { _id: leadId }));
@@ -19,18 +19,26 @@ const createDeal = async (req, res, next) => {
         .json({ message: "Unauthorized to add deals to this lead" });
     }
 
-    const newDeal = await Deal.create({ title, amount, stage, leadId });
+    const newDeal = await Deal.create({
+      title,
+      amount,
+      stage,
+      leadId,
+      // Empty string / null means "no date"
+      expectedCloseDate: expectedCloseDate || undefined,
+    });
     res.status(201).json(newDeal);
   } catch (error) {
     next(error);
   }
 };
 
-// Update Deal Stage (Prospect, Negotiation, Won, Lost)
-const updateDealStage = async (req, res, next) => {
+// Update a deal: any of title, amount, stage, expectedCloseDate
+// (the pipeline's drag-and-drop sends just { stage })
+const updateDeal = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { stage } = req.body; // Validated in the route
+    const { title, amount, stage, expectedCloseDate } = req.body; // Validated in the route
 
     const deal = await Deal.findById(id).populate("leadId");
     if (!deal) return res.status(404).json({ message: "Deal not found" });
@@ -43,7 +51,13 @@ const updateDealStage = async (req, res, next) => {
         .json({ message: "Unauthorized to update this deal" });
     }
 
-    deal.stage = stage;
+    if (title !== undefined) deal.title = title;
+    if (amount !== undefined) deal.amount = amount;
+    if (stage !== undefined) deal.stage = stage;
+    if (expectedCloseDate !== undefined) {
+      // null or "" clears the date
+      deal.expectedCloseDate = expectedCloseDate || undefined;
+    }
     await deal.save();
 
     // Only return the lead fields the UI needs
@@ -108,7 +122,8 @@ const deleteDeal = async (req, res, next) => {
 // getDealsByStage is kept as an alias so older imports keep working
 module.exports = {
   createDeal,
-  updateDealStage,
+  updateDeal,
+  updateDealStage: updateDeal, // old name kept so older imports keep working
   getDeals,
   getDealsByStage: getDeals,
   deleteDeal,

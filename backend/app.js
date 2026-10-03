@@ -8,6 +8,8 @@ require("dotenv").config();
 
 const app = express();
 const isProd = process.env.NODE_ENV === "production";
+// Automated tests create many accounts quickly; rate limits would block them
+const skipLimits = () => process.env.NODE_ENV === "test";
 
 // Render/Vercel sit behind a proxy. Without this, every request appears to
 // come from the proxy's IP, so the login limiter would lock out ALL users
@@ -57,6 +59,7 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true, // Successful logins don't count against the limit
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipLimits,
   message: {
     message:
       "Too many login attempts from this IP, please try again after 15 minutes",
@@ -68,6 +71,7 @@ const registerLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipLimits,
   message: {
     message: "Too many accounts created from this IP, please try again later",
   },
@@ -79,6 +83,7 @@ const apiLimiter = rateLimit({
   max: 500, // requests per IP per window
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipLimits,
   message: { message: "Too many requests, please slow down" },
 });
 
